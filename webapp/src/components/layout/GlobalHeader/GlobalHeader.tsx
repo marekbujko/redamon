@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Crosshair, FolderOpen, Shield, CircleHelp, TrendingUp, FileText } from 'lucide-react'
+import { Crosshair, FolderOpen, Shield, CircleHelp, TrendingUp, FileText, Settings } from 'lucide-react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { ProjectSelector } from './ProjectSelector'
 import { UserSelector } from './UserSelector'
@@ -64,6 +64,14 @@ export function GlobalHeader() {
         <ThemeToggle />
 
         <div className={styles.divider} />
+
+        <Link
+          href="/settings"
+          className={`${styles.helpLink} ${pathname === '/settings' ? styles.navItemActive : ''}`}
+          title="Global Settings"
+        >
+          <Settings size={16} />
+        </Link>
 
         <a
           href="https://github.com/samugit83/redamon/wiki"

@@ -121,28 +121,15 @@ cd redamon
 cp .env.example .env
 ```
 
-Edit `.env` and add at least one AI provider key:
-```env
-ANTHROPIC_API_KEY=sk-ant-...   # recommended
-# or
-OPENAI_API_KEY=sk-proj-...
-```
-Get your key from [Anthropic Console](https://console.anthropic.com/) or [OpenAI Platform](https://platform.openai.com/api-keys).
+After starting the stack, open **http://localhost:3000/settings** (gear icon in the header) to configure your AI providers. LLM keys and Tavily API key **must** be set from the frontend — they are not read from `.env` or environment variables.
 
-**Additional AI providers** (optional — add these to unlock more models):
-```env
-OPENAI_COMPAT_BASE_URL=http://host.docker.internal:11434/v1  # Ollama on the same machine (see below for remote servers)
-OPENAI_COMPAT_API_KEY=                                        # optional (fallback token "ollama" is used if empty)
-OPENROUTER_API_KEY=sk-or-...   # OpenRouter — access 300+ models (Llama, Gemini, Mistral, etc.) via openrouter.ai
-AWS_ACCESS_KEY_ID=AKIA...      # AWS Bedrock — access foundation models (Claude, Titan, Llama, etc.)
-AWS_SECRET_ACCESS_KEY=...      # AWS Bedrock secret key
-AWS_DEFAULT_REGION=us-east-1   # AWS Bedrock region (default: us-east-1)
-```
-The model selector in the project settings **dynamically fetches** available models from each provider whose API key is configured. Only providers with valid keys are shown.
+- **LLM Providers** — add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
+- **Tavily API Key** — enables web search for the AI agent ([tavily.com](https://tavily.com))
 
-**Optional keys** (add these for extra capabilities):
+All AI keys are stored per-user in the database. See the **[AI Model Providers](https://github.com/samuele-cozzi/redamon/wiki/10.-AI-Model-Providers)** wiki page for detailed setup instructions.
+
+**Optional `.env` keys** (infrastructure only — not for AI providers):
 ```env
-TAVILY_API_KEY=tvly-...        # Web search for the AI agent — get one at tavily.com
 NVD_API_KEY=...                # NIST NVD API — higher rate limits for CVE lookups — nist.gov/developers
 NGROK_AUTHTOKEN=...            # ngrok TCP tunnel for reverse shells (single port) — dashboard.ngrok.com
 CHISEL_SERVER_URL=...          # chisel TCP tunnel (multi-port, requires VPS) — github.com/jpillora/chisel
@@ -582,65 +569,45 @@ For full details on all 10 attack path categories, the intent router architectur
 
 RedAmon supports **five AI providers** out of the box, giving you access to **400+ language models** through a single, unified interface. The model selector in the project settings **dynamically fetches** available models from each configured provider — no hardcoded lists, no manual updates. When a provider releases a new model, it appears automatically.
 
-| Provider | Models | Pricing | API Key Required |
-|----------|--------|---------|-----------------|
-| **OpenAI** (Direct) | ~30 chat models — GPT-5.2, GPT-5, GPT-4.1, o3, o4-mini, and more | Pay-per-token via OpenAI | `OPENAI_API_KEY` |
-| **Anthropic** (Direct) | ~15 models — Claude Opus 4.6, Sonnet 4.6/4.5, Haiku 4.5 | Pay-per-token via Anthropic | `ANTHROPIC_API_KEY` |
-| **OpenAI-Compatible** | Any self-hosted or third-party OpenAI-compatible API (for example Ollama, local gateways, proxies). Model lists come directly from your backend; choose chat-capable models manually | Depends on your backend | `OPENAI_COMPAT_BASE_URL` (`OPENAI_COMPAT_API_KEY` optional) |
-| **OpenRouter** | **300+ models** — Llama 4, Gemini 3, Mistral, Qwen, DeepSeek, Command R+, and hundreds more from 50+ providers routed through a single API | Variable per model (some free) | `OPENROUTER_API_KEY` |
-| **AWS Bedrock** | ~60 foundation models — Claude, Titan, Llama, Cohere Command, Mistral, AI21 Jamba, and more | Pay-per-token via AWS | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
+| Provider | Models | Pricing |
+|----------|--------|---------|
+| **OpenAI** (Direct) | ~30 chat models — GPT-5.2, GPT-5, GPT-4.1, o3, o4-mini, and more | Pay-per-token via OpenAI |
+| **Anthropic** (Direct) | ~15 models — Claude Opus 4.6, Sonnet 4.6/4.5, Haiku 4.5 | Pay-per-token via Anthropic |
+| **OpenAI-Compatible** | Any self-hosted or third-party OpenAI-compatible API (Ollama, vLLM, LM Studio, Groq, etc.) | Depends on your backend |
+| **OpenRouter** | **300+ models** — Llama 4, Gemini 3, Mistral, Qwen, DeepSeek, Command R+, and hundreds more | Variable per model (some free) |
+| **AWS Bedrock** | ~60 foundation models — Claude, Titan, Llama, Cohere Command, Mistral, AI21 Jamba, and more | Pay-per-token via AWS |
 
 #### How It Works
 
-1. **Provider detection** — On startup, the agent checks which provider credentials/URLs are set in the environment. Only configured providers are queried.
-2. **Dynamic model fetching** — The agent's `/models` endpoint fetches available models from all configured providers in parallel (OpenAI API, Anthropic API, OpenAI-compatible `/models`, OpenRouter API, AWS Bedrock `ListFoundationModels`). Results are cached for 1 hour.
+1. **Provider configuration** — Configure providers in **Global Settings** (http://localhost:3000/settings). All API keys are stored per-user in the database. Only configured providers are queried.
+2. **Dynamic model fetching** — The agent's `/models` endpoint fetches available models from all configured providers in parallel (OpenAI API, Anthropic API, OpenRouter API, AWS Bedrock `ListFoundationModels`). OpenAI-Compatible providers appear as single custom model entries. Results are cached for 1 hour.
 3. **Searchable model selector** — The project settings UI presents a searchable dropdown grouped by provider. Each model shows its name, context window size, and pricing info. Type to filter across all providers instantly.
-4. **Provider prefix convention** — Models are stored with a provider prefix (`openai_compat/`, `openrouter/`, `bedrock/`) so the agent knows which SDK to use at runtime. OpenAI and Anthropic models are detected by name pattern (no prefix needed). Existing projects continue to work unchanged.
+4. **Provider prefix convention** — Models are stored with a provider prefix (`custom/`, `openrouter/`, `bedrock/`) so the agent knows which SDK to use at runtime. OpenAI and Anthropic models are detected by name pattern (no prefix needed). Existing projects continue to work unchanged.
+5. **Test Connection** — Each provider can be tested before saving using the "Test Connection" button in Global Settings.
 
 > **Note (OpenAI-Compatible):** RedAmon does not automatically validate chat capability for models returned by your compatible backend. If the backend exposes embedding/audio/image models, select a chat model manually.
 
 #### Provider Setup
 
-```env
-# .env — add the keys for the providers you want to use
+Open **Global Settings** (http://localhost:3000/settings → gear icon), click "Add Provider", choose the type, enter your credentials, test the connection, and save. Get your keys from:
+- **OpenAI** — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** — [console.anthropic.com](https://console.anthropic.com/)
+- **OpenRouter** — [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **AWS Bedrock** — IAM user with `bedrock:InvokeModel` + `bedrock:ListFoundationModels` permissions
 
-# Direct providers (lowest latency, direct API connection)
-OPENAI_API_KEY=sk-proj-...          # OpenAI — platform.openai.com/api-keys
-ANTHROPIC_API_KEY=sk-ant-...        # Anthropic — console.anthropic.com
-
-# OpenAI-compatible providers (self-hosted or third-party)
-OPENAI_COMPAT_BASE_URL=http://host.docker.internal:11434/v1  # Ollama on same machine (use IP for remote, e.g. http://192.168.1.50:11434/v1)
-OPENAI_COMPAT_API_KEY=                                        # Optional; fallback token "ollama" is used if empty
-
-# Gateway providers (access many models through one key)
-OPENROUTER_API_KEY=sk-or-...        # OpenRouter — openrouter.ai/settings/keys
-
-# AWS Bedrock (uses standard AWS credential chain)
-AWS_ACCESS_KEY_ID=AKIA...           # IAM user with bedrock:InvokeModel permission
-AWS_SECRET_ACCESS_KEY=...           # IAM secret key
-AWS_DEFAULT_REGION=us-east-1        # Recommended: us-east-1 (N. Virginia) has the widest model availability
-```
-
-> **Note (Bedrock):** Foundation models on AWS Bedrock are now **automatically enabled** across all commercial regions when first invoked — no manual model access activation is required. Just create an IAM user with `bedrock:InvokeModel` and `bedrock:ListFoundationModels` permissions, set the credentials above, and start using any model immediately.
+> **Note (Bedrock):** Foundation models on AWS Bedrock are now **automatically enabled** across all commercial regions when first invoked — no manual model access activation is required.
 
 > **Tip:** You can configure multiple providers simultaneously. The model selector will show all available models from all configured providers, letting you switch between a free Llama model on OpenRouter for testing and Claude Opus on Anthropic for production assessments — without changing any code.
 
 #### OpenAI-Compatible Provider
 
-Any backend that exposes the standard `/v1/chat/completions` and `/v1/models` endpoints works out of the box with RedAmon. Set `OPENAI_COMPAT_BASE_URL` in your `.env` and matching models appear in the project settings dropdown automatically.
+Any backend that exposes the standard `/v1/chat/completions` endpoint works out of the box with RedAmon. Add it via **Global Settings → Add Provider → OpenAI-Compatible** with presets for Ollama, vLLM, LM Studio, Groq, Together AI, Fireworks, Mistral, and Deepinfra.
 
 The agent container already includes `host.docker.internal` resolution, so local servers running on your host machine are reachable from Docker.
 
-**Ollama on the same machine as RedAmon (local):**
-```env
-OPENAI_COMPAT_BASE_URL=http://host.docker.internal:11434/v1
-```
+**Ollama on the same machine:** use base URL `http://host.docker.internal:11434/v1`
 
-**Ollama on a different machine (remote server):**
-```env
-OPENAI_COMPAT_BASE_URL=http://192.168.1.50:11434/v1   # replace with your Ollama server's IP or hostname
-```
-Use the IP address (or hostname) of the remote machine instead of `host.docker.internal`. Make sure port `11434` is reachable from the machine running RedAmon (no firewall blocking it).
+**Ollama on a different machine:** use `http://192.168.1.50:11434/v1` (replace with your Ollama server's IP). Make sure port `11434` is reachable from the machine running RedAmon.
 
 > **Important:** By default Ollama only listens on `localhost`, which rejects connections from other machines and from Docker containers. You must bind it to all interfaces (`0.0.0.0`) on the machine running Ollama:
 > ```bash
@@ -653,8 +620,8 @@ Use the IP address (or hostname) of the remote machine instead of `host.docker.i
 
 **Self-hosted / local (free):**
 
-| Provider | Description | Example `OPENAI_COMPAT_BASE_URL` |
-|----------|-------------|----------------------------------|
+| Provider | Description | Example Base URL |
+|----------|-------------|-----------------|
 | [Ollama](https://ollama.com/) | Easiest way to run local LLMs — single command setup | `http://host.docker.internal:11434/v1` |
 | [vLLM](https://github.com/vllm-project/vllm) | High-performance GPU inference server | `http://host.docker.internal:8000/v1` |
 | [LM Studio](https://lmstudio.ai/) | Desktop app with built-in local server | `http://host.docker.internal:1234/v1` |
@@ -1300,7 +1267,7 @@ flowchart TB
 flowchart TB
     subgraph Input["📥 Input Configuration"]
         Params[project_settings.py<br/>Webapp API → PostgreSQL<br/>TARGET_DOMAIN, SCAN_MODULES]
-        Env[.env<br/>API Keys<br/>Neo4j Credentials]
+        Env[.env<br/>Infrastructure Config<br/>Neo4j Credentials]
     end
 
     subgraph Container["🐳 recon-container (Kali Linux)"]
@@ -1602,11 +1569,11 @@ These containers are designed to be deployed alongside the main stack so the AI 
 |-----------|------|
 | **LangChain** | LLM application framework — prompt management, tool binding, chain composition |
 | **LangGraph** | State machine engine implementing the ReAct (Reasoning + Acting) agent loop |
-| **OpenAI** (Direct) | Supported LLM family — GPT-5.2, GPT-5, GPT-4.1. Requires `OPENAI_API_KEY` |
-| **Anthropic** (Direct) | Supported LLM family — Claude Opus 4.6, Sonnet 4.5, Haiku 4.5. Requires `ANTHROPIC_API_KEY` |
-| **OpenAI-Compatible** | Any OpenAI-compatible endpoint (for example Ollama). Requires `OPENAI_COMPAT_BASE_URL`; optional `OPENAI_COMPAT_API_KEY` |
-| **OpenRouter** | Multi-model gateway — access 300+ models (Llama 4, Gemini 3, Mistral, Qwen, etc.) through a single API key. Uses OpenAI-compatible endpoint. Requires `OPENROUTER_API_KEY` |
-| **AWS Bedrock** | Managed AWS service — access foundation models (Claude, Titan, Llama, Cohere, etc.) via `langchain-aws`. Requires `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
+| **OpenAI** (Direct) | Supported LLM family — GPT-5.2, GPT-5, GPT-4.1. Configure in Global Settings |
+| **Anthropic** (Direct) | Supported LLM family — Claude Opus 4.6, Sonnet 4.5, Haiku 4.5. Configure in Global Settings |
+| **OpenAI-Compatible** | Any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Configure in Global Settings |
+| **OpenRouter** | Multi-model gateway — access 300+ models through a single API key. Configure in Global Settings |
+| **AWS Bedrock** | Managed AWS service — access foundation models (Claude, Titan, Llama, Cohere, etc.) via `langchain-aws`. Configure in Global Settings |
 | **Tavily** | AI-powered web search used by the agent for CVE research and exploit intelligence |
 | **Model Context Protocol (MCP)** | Standardized protocol for tool integration — the agent calls security tools through MCP servers |
 | **LangChain AWS** | AWS Bedrock integration — `ChatBedrockConverse` for Bedrock foundation models |

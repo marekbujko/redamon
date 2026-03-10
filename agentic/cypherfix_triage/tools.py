@@ -53,13 +53,13 @@ class TriageNeo4jToolManager:
 class TriageWebSearchManager:
     """Web search tool for enriching triage analysis."""
 
-    def __init__(self):
-        self.tavily_api_key = os.environ.get("TAVILY_API_KEY", "")
+    def __init__(self, tavily_api_key: str = ""):
+        self.tavily_api_key = tavily_api_key or ""
 
     async def search(self, query: str, max_results: int = 5) -> str:
         """Search the web using Tavily API."""
         if not self.tavily_api_key:
-            return "Web search unavailable: TAVILY_API_KEY not configured"
+            return "Web search unavailable: Tavily API key not configured in Global Settings"
 
         try:
             import httpx

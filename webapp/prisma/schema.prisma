@@ -8,15 +8,63 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(cuid())
+  id            String            @id @default(cuid())
   name          String
-  email         String         @unique
+  email         String            @unique
   projects      Project[]
   conversations Conversation[]
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  llmProviders  UserLlmProvider[]
+  settings      UserSettings?
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
 
   @@map("users")
+}
+
+model UserLlmProvider {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // "openai" | "anthropic" | "openrouter" | "bedrock" | "openai_compatible"
+  providerType    String   @map("provider_type")
+  name            String
+
+  // Auth
+  apiKey          String   @default("") @map("api_key")
+
+  // OpenAI-Compatible only
+  baseUrl         String   @default("") @map("base_url")
+  modelIdentifier String   @default("") @map("model_identifier")
+  defaultHeaders  Json     @default("{}") @map("default_headers")
+  timeout         Int      @default(120)
+  temperature     Float    @default(0)
+  maxTokens       Int      @default(16384) @map("max_tokens")
+
+  // Bedrock only
+  awsRegion       String   @default("us-east-1") @map("aws_region")
+  awsAccessKeyId  String   @default("") @map("aws_access_key_id")
+  awsSecretKey    String   @default("") @map("aws_secret_key")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("user_llm_providers")
+}
+
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Tool API Keys
+  tavilyApiKey    String   @default("") @map("tavily_api_key")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("user_settings")
 }
 
 model Project {

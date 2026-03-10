@@ -236,6 +236,48 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['ROE_COMPLIANCE_FRAMEWORKS'] = project.get('roeComplianceFrameworks', DEFAULT_AGENT_SETTINGS['ROE_COMPLIANCE_FRAMEWORKS'])
     settings['ROE_NOTES'] = project.get('roeNotes', DEFAULT_AGENT_SETTINGS['ROE_NOTES'])
 
+    # --- Fetch user-level LLM providers and settings from DB ---
+    user_id = project.get('userId', '')
+    if user_id and webapp_url:
+        # Fetch LLM providers (with full API keys via ?internal=true)
+        try:
+            providers_resp = requests.get(
+                f"{webapp_url.rstrip('/')}/api/users/{user_id}/llm-providers?internal=true",
+                timeout=10,
+            )
+            providers_resp.raise_for_status()
+            settings['USER_LLM_PROVIDERS'] = providers_resp.json()
+        except Exception as e:
+            logger.warning(f"Failed to fetch user LLM providers: {e}")
+            settings['USER_LLM_PROVIDERS'] = []
+
+        # Fetch user settings (Tavily API key)
+        try:
+            user_settings_resp = requests.get(
+                f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true",
+                timeout=10,
+            )
+            user_settings_resp.raise_for_status()
+            settings['USER_SETTINGS'] = user_settings_resp.json()
+        except Exception as e:
+            logger.warning(f"Failed to fetch user settings: {e}")
+            settings['USER_SETTINGS'] = {}
+
+        # If selected model is custom/, extract its specific config
+        model_id = settings.get('OPENAI_MODEL', '')
+        if model_id.startswith('custom/'):
+            config_id = model_id[len('custom/'):]
+            for p in settings.get('USER_LLM_PROVIDERS', []):
+                if p.get('id') == config_id:
+                    settings['CUSTOM_LLM_CONFIG'] = p
+                    break
+            else:
+                logger.warning(f"Custom LLM config {config_id} not found in user providers")
+                settings['CUSTOM_LLM_CONFIG'] = None
+    else:
+        settings['USER_LLM_PROVIDERS'] = []
+        settings['USER_SETTINGS'] = {}
+
     logger.info(f"Loaded {len(settings)} agent settings for project {project_id}")
     return settings
 

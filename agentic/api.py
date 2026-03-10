@@ -262,17 +262,7 @@ async def parse_roe_document(body: RoeParseRequest):
 
     requested_model = body.model or DEFAULT_AGENT_SETTINGS['OPENAI_MODEL']
     try:
-        llm = setup_llm(
-            requested_model,
-            openai_api_key=orchestrator.openai_api_key,
-            anthropic_api_key=orchestrator.anthropic_api_key,
-            openrouter_api_key=orchestrator.openrouter_api_key,
-            openai_compat_api_key=orchestrator.openai_compat_api_key,
-            openai_compat_base_url=orchestrator.openai_compat_base_url,
-            aws_access_key_id=orchestrator.aws_access_key_id,
-            aws_secret_access_key=orchestrator.aws_secret_access_key,
-            aws_region=orchestrator.aws_region,
-        )
+        llm = _setup_llm_for_endpoint(requested_model)
     except Exception as e:
         logger.error(f"RoE parse: failed to set up LLM ({requested_model}): {e}")
         return JSONResponse(content={"error": f"LLM not available for model {requested_model}"}, status_code=503)
@@ -343,17 +333,7 @@ async def summarize_report(body: ReportSummarizeRequest):
 
     requested_model = body.model or DEFAULT_AGENT_SETTINGS['OPENAI_MODEL']
     try:
-        llm = setup_llm(
-            requested_model,
-            openai_api_key=orchestrator.openai_api_key,
-            anthropic_api_key=orchestrator.anthropic_api_key,
-            openrouter_api_key=orchestrator.openrouter_api_key,
-            openai_compat_api_key=orchestrator.openai_compat_api_key,
-            openai_compat_base_url=orchestrator.openai_compat_base_url,
-            aws_access_key_id=orchestrator.aws_access_key_id,
-            aws_secret_access_key=orchestrator.aws_secret_access_key,
-            aws_region=orchestrator.aws_region,
-        )
+        llm = _setup_llm_for_endpoint(requested_model)
     except Exception as e:
         logger.error(f"Report summarizer: failed to set up LLM ({requested_model}): {e}")
         return JSONResponse(content={"error": f"LLM not available for model {requested_model}"}, status_code=503)
@@ -400,6 +380,35 @@ async def health():
     )
 
 
+def _setup_llm_for_endpoint(model_name: str) -> "BaseChatModel":
+    """Set up an LLM for non-agent endpoints (RoE parse, report summarizer).
+
+    Uses the orchestrator's loaded project settings (user LLM providers from DB).
+    """
+    from orchestrator_helpers.llm_setup import setup_llm, _resolve_provider_key
+    from project_settings import get_settings
+
+    settings = get_settings()
+    user_providers = settings.get('USER_LLM_PROVIDERS', [])
+    custom_config = settings.get('CUSTOM_LLM_CONFIG')
+
+    openai_p = _resolve_provider_key(user_providers, "openai")
+    anthropic_p = _resolve_provider_key(user_providers, "anthropic")
+    openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+    bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+
+    return setup_llm(
+        model_name,
+        openai_api_key=(openai_p or {}).get("apiKey"),
+        anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+        openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+        aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+        aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+        aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
+        custom_llm_config=custom_config,
+    )
+
+
 @app.get("/defaults", tags=["System"])
 async def get_defaults():
     """
@@ -438,16 +447,99 @@ async def get_defaults():
 
 
 @app.get("/models", tags=["System"])
-async def get_models():
+async def get_models(providers: str = Query(default="", description="JSON-encoded list of provider configs from DB")):
     """
     Fetch available AI models from all configured providers.
 
-    Returns a dict keyed by provider name, each containing a list of models
-    with {id, name, context_length, description}. Results are cached for 1 hour.
-    Only providers with valid API keys in the environment are queried.
+    When `providers` query param is supplied (JSON list of UserLlmProvider rows),
+    uses those configs for discovery. Otherwise falls back to env vars.
     """
     from model_providers import fetch_all_models
-    return await fetch_all_models()
+
+    provider_list = None
+    if providers:
+        import json as json_mod
+        try:
+            provider_list = json_mod.loads(providers)
+        except (json_mod.JSONDecodeError, TypeError):
+            logger.warning("Invalid providers JSON in /models request, falling back to env")
+
+    return await fetch_all_models(providers=provider_list)
+
+
+# =============================================================================
+# LLM PROVIDER TEST — test a provider config with a simple message
+# =============================================================================
+
+class LlmProviderTestRequest(BaseModel):
+    """Request model for testing an LLM provider config."""
+    providerType: str = "openai_compatible"
+    apiKey: str = ""
+    baseUrl: str = ""
+    modelIdentifier: str = ""
+    defaultHeaders: dict = {}
+    timeout: int = 120
+    temperature: float = 0
+    maxTokens: int = 16384
+    awsRegion: str = "us-east-1"
+    awsAccessKeyId: str = ""
+    awsSecretKey: str = ""
+
+
+@app.post("/llm-provider/test", tags=["System"])
+async def test_llm_provider(body: LlmProviderTestRequest):
+    """Test an LLM provider config by sending a simple message."""
+    from orchestrator_helpers.llm_setup import setup_llm
+
+    try:
+        ptype = body.providerType
+
+        if ptype == "openai":
+            llm = setup_llm("gpt-4o-mini", openai_api_key=body.apiKey)
+        elif ptype == "anthropic":
+            llm = setup_llm("claude-sonnet-4-20250514", anthropic_api_key=body.apiKey)
+        elif ptype == "openrouter":
+            llm = setup_llm("openrouter/openai/gpt-4o-mini", openrouter_api_key=body.apiKey)
+        elif ptype == "bedrock":
+            llm = setup_llm(
+                "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+                aws_access_key_id=body.awsAccessKeyId,
+                aws_secret_access_key=body.awsSecretKey,
+                aws_region=body.awsRegion,
+            )
+        elif ptype == "openai_compatible":
+            from langchain_openai import ChatOpenAI
+            kwargs = dict(
+                model=body.modelIdentifier or "default",
+                api_key=body.apiKey or "ollama",
+                temperature=body.temperature,
+                max_tokens=body.maxTokens,
+            )
+            if body.baseUrl:
+                kwargs["base_url"] = body.baseUrl
+            if body.defaultHeaders:
+                kwargs["default_headers"] = body.defaultHeaders
+            if body.timeout:
+                kwargs["timeout"] = float(body.timeout)
+            llm = ChatOpenAI(**kwargs)
+        else:
+            return JSONResponse(
+                content={"success": False, "error": f"Unknown provider type: {ptype}"},
+                status_code=400,
+            )
+
+        response = await llm.ainvoke([HumanMessage(content="Say hello in one sentence.")])
+        from orchestrator_helpers import normalize_content
+        text = normalize_content(response.content).strip()
+
+        return {"success": True, "response_text": text}
+
+    except Exception as e:
+        logger.error(f"LLM provider test failed: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=400,
+        )
 
 
 @app.get("/files", tags=["Files"])
@@ -620,8 +712,11 @@ async def get_tunnel_status():
     """Return live status of ngrok and chisel tunnels."""
     from utils import _query_ngrok_tunnel, _query_chisel_tunnel
 
-    ngrok_info = _query_ngrok_tunnel() if os.environ.get("NGROK_AUTHTOKEN") else None
-    chisel_info = _query_chisel_tunnel() if os.environ.get("CHISEL_SERVER_URL") else None
+    has_ngrok = bool(os.environ.get("NGROK_AUTHTOKEN"))
+    has_chisel = bool(os.environ.get("CHISEL_SERVER_URL"))
+
+    ngrok_info = _query_ngrok_tunnel() if has_ngrok else None
+    chisel_info = _query_chisel_tunnel() if has_chisel else None
 
     return {
         "ngrok": {"active": True, "host": ngrok_info["host"], "port": ngrok_info["port"]} if ngrok_info else {"active": False},

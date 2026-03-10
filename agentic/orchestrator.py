@@ -74,14 +74,7 @@ class AgentOrchestrator:
 
     def __init__(self):
         """Initialize the orchestrator with configuration."""
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.openai_compat_api_key = os.getenv("OPENAI_COMPAT_API_KEY")
-        self.openai_compat_base_url = os.getenv("OPENAI_COMPAT_BASE_URL")
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        self.aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
-        self.aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-        self.aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        # Infrastructure-only env vars (stay in docker-compose)
         self.neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         self.neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         self.neo4j_password = os.getenv("NEO4J_PASSWORD")
@@ -167,18 +160,43 @@ class AgentOrchestrator:
         """Load project settings and reconfigure LLM if model changed."""
         apply_project_settings(self, project_id)
 
+        # Update Tavily key from user settings if available
+        user_settings = getattr(self, '_user_settings', {})
+        tavily_key = user_settings.get('tavilyApiKey', '')
+        if tavily_key and self._web_search_manager and self._web_search_manager.api_key != tavily_key:
+            self._web_search_manager.api_key = tavily_key
+            new_tool = self._web_search_manager.get_tool()
+            if new_tool and self.tool_executor:
+                self.tool_executor.update_web_search_tool(new_tool)
+                logger.info("Updated Tavily web search tool with user settings key")
+
     def _setup_llm(self) -> None:
-        """Initialize the LLM based on current model_name."""
+        """Initialize the LLM based on current model_name.
+
+        Resolves keys from the cached project settings (if loaded)
+        or from whatever user providers are available.
+        """
+        from project_settings import get_settings
+        from orchestrator_helpers.llm_setup import _resolve_provider_key
+
+        settings = get_settings()
+        user_providers = settings.get('USER_LLM_PROVIDERS', [])
+        custom_config = settings.get('CUSTOM_LLM_CONFIG')
+
+        openai_p = _resolve_provider_key(user_providers, "openai")
+        anthropic_p = _resolve_provider_key(user_providers, "anthropic")
+        openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+        bedrock_p = _resolve_provider_key(user_providers, "bedrock")
+
         self.llm = setup_llm(
             self.model_name,
-            openai_api_key=self.openai_api_key,
-            anthropic_api_key=self.anthropic_api_key,
-            openrouter_api_key=self.openrouter_api_key,
-            openai_compat_api_key=self.openai_compat_api_key,
-            openai_compat_base_url=self.openai_compat_base_url,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-            aws_region=self.aws_region,
+            openai_api_key=(openai_p or {}).get("apiKey"),
+            anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+            openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+            aws_access_key_id=(bedrock_p or {}).get("awsAccessKeyId"),
+            aws_secret_access_key=(bedrock_p or {}).get("awsSecretKey"),
+            aws_region=(bedrock_p or {}).get("awsRegion") or "us-east-1",
+            custom_llm_config=custom_config,
         )
 
     # =========================================================================
@@ -200,9 +218,9 @@ class AgentOrchestrator:
         )
         graph_tool = self.neo4j_manager.get_tool()
 
-        # Setup Tavily web search tool
-        web_search_manager = WebSearchToolManager()
-        web_search_tool = web_search_manager.get_tool()
+        # Setup Tavily web search tool (key resolved later via update_tavily_key)
+        self._web_search_manager = WebSearchToolManager()
+        web_search_tool = self._web_search_manager.get_tool()
 
         # Create phase-aware tool executor
         self.tool_executor = PhaseAwareToolExecutor(mcp_manager, graph_tool, web_search_tool)

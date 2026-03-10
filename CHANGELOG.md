@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2026-03-10
+
+### Added
+
+- **Global Settings Page** — new `/settings` page (gear icon in header) for managing all user-level configuration through the UI. AI provider keys and Tavily API key are configured exclusively here — no `.env` file needed. Two sections:
+  - **LLM Providers** — add, edit, delete, and test LLM provider configurations stored per-user in the database. Supports five provider types:
+    - **OpenAI, Anthropic, OpenRouter** — enter API key, all models auto-discovered
+    - **AWS Bedrock** — enter AWS credentials + region, foundation models auto-discovered
+    - **OpenAI-Compatible** — single endpoint+model configuration with presets for Ollama, vLLM, LM Studio, Groq, Together AI, Fireworks AI, Mistral AI, and Deepinfra. Supports custom base URL, headers, timeout, temperature, and max tokens
+  - **Tool API Keys** — Tavily API key (web search for CVE research and exploit lookups)
+- **Test Connection** — each LLM provider can be tested before saving with a "Test Connection" button that sends a simple message and shows the response
+- **DB-only settings** — AI provider keys and Tavily API key are stored exclusively in the database (per-user). No env-var fallback — `.env` is reserved for infrastructure variables only (NVD, tunneling, database credentials, ports)
+- **Prisma schema** — added `UserLlmProvider` and `UserSettings` models with relations to `User`
+- **Centralized LLM setup** — CypherFix triage and codefix orchestrators now use the shared `setup_llm()` function instead of duplicating provider routing logic
+
+### Changed
+
+- **Model selector** — now passes `userId` to `/api/models` to fetch models from user-specific DB-stored providers
+- **Agent orchestrator** — removed all env-var reads for AI provider keys; keys come exclusively from DB-stored user providers
+- **`.env.example`** — stripped of all AI provider keys; now contains only infrastructure variables (NVD, tunneling, database)
+
+---
+
 ## [2.3.0] - 2026-03-08
 
 ### Added

@@ -410,7 +410,7 @@ class WebSearchToolManager:
     """Manages Tavily web search tool for CVE research and exploit lookups."""
 
     def __init__(self, api_key: str = None, max_results: int = 5):
-        self.api_key = api_key or os.environ.get('TAVILY_API_KEY', '')
+        self.api_key = api_key or ''
         self.max_results = max_results
 
     def get_tool(self) -> Optional[callable]:
@@ -418,12 +418,12 @@ class WebSearchToolManager:
         Set up and return the Tavily web search tool.
 
         Returns:
-            The web_search tool function, or None if TAVILY_API_KEY is not set.
+            The web_search tool function, or None if Tavily API key is not configured.
         """
         if not self.api_key:
             logger.warning(
-                "TAVILY_API_KEY not set - web_search tool will not be available. "
-                "Set TAVILY_API_KEY environment variable to enable web search."
+                "Tavily API key not configured - web_search tool will not be available. "
+                "Set it in Global Settings (http://localhost:3000/settings)."
             )
             return None
 
@@ -457,6 +457,7 @@ class WebSearchToolManager:
                     max_results=manager.max_results,
                     topic="general",
                     search_depth="advanced",
+                    api_key=manager.api_key,
                 )
 
                 results = await tavily_tool.ainvoke({"query": query})
@@ -522,6 +523,11 @@ class PhaseAwareToolExecutor:
             tool_name = getattr(tool, 'name', None)
             if tool_name:
                 self._all_tools[tool_name] = tool
+
+    def update_web_search_tool(self, tool: callable) -> None:
+        """Replace the web search tool (e.g. when Tavily key changes)."""
+        self.web_search_tool = tool
+        self._all_tools["web_search"] = tool
 
     def _extract_text_from_output(self, output) -> str:
         """

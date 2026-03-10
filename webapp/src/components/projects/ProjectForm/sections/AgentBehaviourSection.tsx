@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronDown, Bot, Search, Loader2 } from 'lucide-react'
 import { Toggle } from '@/components/ui'
+import { useProject } from '@/providers/ProjectProvider'
 import type { Project } from '@prisma/client'
 import styles from '../ProjectForm.module.css'
 
@@ -37,6 +38,7 @@ function getDisplayName(modelId: string, allModels: Record<string, ModelOption[]
 
 export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSectionProps) {
   const [isOpen, setIsOpen] = useState(true)
+  const { userId } = useProject()
 
   // Model selector state
   const [allModels, setAllModels] = useState<Record<string, ModelOption[]>>({})
@@ -47,9 +49,10 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch models on mount
+  // Fetch models on mount (pass userId for user-specific providers)
   useEffect(() => {
-    fetch('/api/models')
+    const params = userId ? `?userId=${userId}` : ''
+    fetch(`/api/models${params}`)
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch')
         return r.json()
@@ -63,7 +66,7 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
       })
       .catch(() => setModelsError(true))
       .finally(() => setModelsLoading(false))
-  }, [])
+  }, [userId])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -203,7 +206,7 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
                   )}
                 </div>
                 <span className={styles.fieldHint}>
-                  Model used by the agent. Each provider requires its own API key in the .env file.
+                  Model used by the agent. Configure providers in Global Settings.
                 </span>
               </div>
             </div>
