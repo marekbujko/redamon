@@ -548,7 +548,9 @@ function renderExecutiveSummary(data: ReportData, narrative?: string): string {
 function renderScope(data: ReportData, narrative?: string): string {
   const { project, graphOverview } = data
   const p = project as any
+  const isIpMode = p.ipMode === true
 
+  // Rules of Engagement
   let roeTable = ''
   if (p.roeClientName || p.roeEngagementType) {
     const rows: string[] = []
@@ -563,19 +565,84 @@ function renderScope(data: ReportData, narrative?: string): string {
     roeTable = `<h3>Rules of Engagement</h3><table class="data-table"><tbody>${rows.join('')}</tbody></table>`
   }
 
+  // Subdomain Resolution Map (domain mode)
+  let mappingTable = ''
+  if (!isIpMode) {
+    const mappings = graphOverview.subdomainMappings || []
+    if (mappings.length > 0) {
+      const rows = mappings.map(m => {
+        const ipList = m.ips.length > 0
+          ? m.ips.map(ip => {
+              const cdn = ip.isCdn && ip.cdnName
+                ? ` <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#dbeafe;color:#1d4ed8">${esc(ip.cdnName)}</span>`
+                : ''
+              return `${esc(ip.address)}${cdn}`
+            }).join('<br/>')
+          : '<span style="color:#9ca3af;font-style:italic">Unresolved</span>'
+        const ports = m.ips.length > 0 ? String(m.openPorts) : '<span style="color:#9ca3af">—</span>'
+        return `<tr><td>${esc(m.subdomain)}</td><td>${ipList}</td><td>${ports}</td></tr>`
+      }).join('')
+      mappingTable = `
+  <h3>Subdomain Resolution Map</h3>
+  <table class="data-table">
+    <thead><tr><th>Subdomain</th><th>Resolved IPs</th><th>Open Ports</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`
+    } else {
+      mappingTable = `<h3>Subdomain Resolution Map</h3><p style="color:#6b7280;font-style:italic">No subdomains discovered.</p>`
+    }
+  } else {
+    // IP Target Map (IP mode)
+    const mappings = graphOverview.ipMappings || []
+    if (mappings.length > 0) {
+      const rows = mappings.map(m => {
+        const hostnames = m.hostnames.length > 0
+          ? m.hostnames.map(h => esc(h)).join('<br/>')
+          : '<span style="color:#9ca3af;font-style:italic">No reverse DNS</span>'
+        const cdn = m.isCdn && m.cdnName
+          ? `<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#dbeafe;color:#1d4ed8">${esc(m.cdnName)}</span>`
+          : '<span style="color:#9ca3af">—</span>'
+        return `<tr><td>${esc(m.ip)}</td><td>${esc(m.version || '')}</td><td>${hostnames}</td><td>${cdn}</td><td>${m.openPorts}</td></tr>`
+      }).join('')
+      mappingTable = `
+  <h3>IP Target Map</h3>
+  <table class="data-table">
+    <thead><tr><th>IP Address</th><th>Version</th><th>Hostnames</th><th>CDN</th><th>Open Ports</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`
+    } else {
+      mappingTable = `<h3>IP Target Map</h3><p style="color:#6b7280;font-style:italic">No IP targets discovered.</p>`
+    }
+  }
+
+  // Target info row
+  const targetRow = isIpMode
+    ? `<tr><td>Target IPs / CIDRs</td><td>${esc((project.targetIps || []).join(', ') || 'N/A')}</td></tr>`
+    : `<tr><td>Target Domain</td><td>${esc(project.targetDomain || 'N/A')}</td></tr>`
+
   return `
 <div class="page-break"></div>
 <div class="section" id="scope">
   <h2 class="section-title">2. Scope & Methodology</h2>
   ${narrative ? `<div class="narrative">${esc(narrative)}</div>` : ''}
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <div class="metric-card-sm"><div class="metric-value-sm">${isIpMode ? 'IP / CIDR' : 'Domain'}</div><div class="metric-label-sm">Scan Mode</div></div>
+    <div class="metric-card-sm"><div class="metric-value-sm">${graphOverview.subdomainStats.total}</div><div class="metric-label-sm">Subdomains</div></div>
+    <div class="metric-card-sm"><div class="metric-value-sm">${graphOverview.infrastructureStats.totalIps}</div><div class="metric-label-sm">Unique IPs</div></div>
+    <div class="metric-card-sm"><div class="metric-value-sm">${graphOverview.endpointCoverage.baseUrls}</div><div class="metric-label-sm">Base URLs</div></div>
+    <div class="metric-card-sm"><div class="metric-value-sm">${graphOverview.endpointCoverage.endpoints}</div><div class="metric-label-sm">Endpoints</div></div>
+    <div class="metric-card-sm"><div class="metric-value-sm">${graphOverview.endpointCoverage.parameters}</div><div class="metric-label-sm">Parameters</div></div>
+  </div>
+
   <h3>Target Information</h3>
   <table class="data-table">
     <tbody>
-      <tr><td>Target Domain</td><td>${esc(project.targetDomain || 'N/A')}</td></tr>
-      <tr><td>Target IPs</td><td>${esc((project.targetIps || []).join(', ') || 'Auto-discovered')}</td></tr>
+      ${targetRow}
       <tr><td>Stealth Mode</td><td>${project.stealthMode ? 'Enabled' : 'Disabled'}</td></tr>
     </tbody>
   </table>
+  ${mappingTable}
   <h3>Discovery Summary</h3>
   <table class="data-table">
     <tbody>

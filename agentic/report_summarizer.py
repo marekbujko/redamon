@@ -22,7 +22,7 @@ Your writing must be:
 - Professional — match the depth and tone of reports from established security firms (NCC Group, CrowdStrike, Mandiant, Bishop Fox)
 - Flowing prose — write well-structured paragraphs with logical transitions. Do NOT use markdown formatting, headings, or bullet points. Do NOT use em dashes (—) anywhere in your writing; use commas, semicolons, colons, or separate sentences instead
 
-Each section should be substantial — at minimum 4-8 paragraphs for most sections, and 8-12+ paragraphs for executiveSummary and recommendationsNarrative. Be thorough — a 1-paragraph summary is insufficient. Cover every significant data point provided. The executiveSummary and recommendationsNarrative are the two most important sections and should be the longest.
+Each section should be substantial — at minimum 4-8 paragraphs for most sections. The executiveSummary should be concise (3-4 paragraphs) for executive stakeholders. The riskNarrative should be extensive (8-12 paragraphs) with the full detailed technical analysis. The recommendationsNarrative should be the longest section. Be thorough — a 1-paragraph summary is insufficient. Cover every significant data point provided.
 
 Respond with valid JSON containing these keys:
 {
@@ -36,31 +36,37 @@ Respond with valid JSON containing these keys:
 
 Section guidelines:
 
-- executiveSummary: This is the MOST IMPORTANT section — a CISO, board member, or executive stakeholder will read it as the primary deliverable. It must be EXTENSIVE (8-12 paragraphs minimum) and serve as a complete standalone briefing. Structure it as follows:
+- executiveSummary: This section is for CISO, board members, and executive stakeholders. It must be CONCISE (3-4 paragraphs maximum) and serve as a high-level briefing that can be read in under 2 minutes.
 
-  OPENING ASSESSMENT: Lead with the computed risk score (X/100) and risk label, and immediately state the single most critical finding — if there is a confirmed RCE or exploit success, this must be the first sentence. State unambiguously whether the target is actively exploitable from the public internet.
+  PARAGRAPH 1 — VERDICT: Lead with the risk score (X/100) and risk label. State the single most critical finding immediately. State whether the target is actively exploitable. Provide the key numbers: total findings (with critical/high counts), confirmed exploits, and attack surface size (subdomains, IPs, endpoints).
 
-  VULNERABILITY LANDSCAPE: Provide a complete numerical breakdown: total vulnerability findings with per-severity counts (critical, high, medium, low), total known CVEs discovered with their own per-severity breakdown (cveCriticalCount, cveHighCount, cveMediumCount, cveLowCount), the average CVSS score across all findings, and the total number of unique technologies found with known CVEs. Explain what these numbers mean — is this a high, moderate, or low density of findings relative to the attack surface size?
+  PARAGRAPH 2 — BUSINESS IMPACT: Translate findings into business language. What could an attacker achieve? RCE on production? Data exfiltration? Internal pivoting? Mention regulatory implications (GDPR, PCI-DSS, SOC2) if applicable. State the exploitable count and any CISA KEV entries.
 
-  EXPLOITATION RESULTS: Detail every confirmed exploitation success — for each, name the exact CVE exploited, the target IP address, the attack type/module used, and what level of access was achieved (RCE, file read, information disclosure, etc.). If CISA KEV entries exist, call them out specifically with their CVE IDs. State the total count of exploitable conditions (exploitableCount).
+  PARAGRAPH 3 — TOP ACTIONS: Name the 3 most urgent remediation actions. Reference the total open remediation items and the detailed triage in the Recommendations section.
 
-  ATTACK SURFACE OVERVIEW: Describe the full digital footprint — number of subdomains (active vs total), IP addresses (how many directly exposed vs CDN-fronted), total endpoints crawled, parameters discovered, open ports and services. Mention the total graph nodes to convey the scope of the mapped infrastructure.
+  PARAGRAPH 4 — CONCLUSION: One clear statement of overall security posture and the single most urgent action to take immediately.
 
-  TECHNOLOGY & CVE ANALYSIS: Highlight the most concerning technologies found — name each one with its version, the number of associated CVEs, and the highest-severity CVE in each. Describe the complete attack chains discovered (Technology → CVE → CWE → CAPEC) and what they reveal about the exploitability of the stack.
-
-  INFRASTRUCTURE SECURITY POSTURE: Discuss certificate health (how many valid vs expired vs self-signed), security header deployment (which headers are present/missing across how many base URLs, with weighted coverage score), and injectable parameter analysis (how many parameters are injectable out of total, broken down by position).
-
-  SECRETS & DATA EXPOSURE: If any GitHub secrets or sensitive files were found, detail the count and implications. If none, state that no credential exposure was detected.
-
-  REMEDIATION SUMMARY: Summarize the total number of open remediation items, broken down by severity. Highlight the top 3 most urgent actions. Reference the detailed triage in the Recommendations section.
-
-  BUSINESS IMPACT: Translate technical findings into business language — what could an attacker actually achieve? Could they execute arbitrary commands on production servers? Could they pivot to internal networks? Could they exfiltrate customer data? What are the regulatory/compliance implications (GDPR, PCI-DSS, SOC2, HIPAA if applicable)? What is the reputational risk?
-
-  CONCLUSION: End with a clear, direct statement of the overall security posture — is the environment critically vulnerable, moderately at risk, or well-defended? State the single most urgent action the organization must take immediately.
+  Keep it brief. Do not list every CVE or finding here; those details belong in the Risk Summary and Findings sections. The reader should be able to scan this in 60 seconds and understand the overall situation.
 
 - scopeNarrative: Describe the full scope of the engagement in detail. Cover: the target domain and any subdomains enumerated, the number of IP addresses discovered and whether they are CDN-fronted or directly exposed, the total endpoints and parameters crawled, services and open ports identified, and technologies fingerprinted with their versions. If Rules of Engagement context is available (client name, engagement type, dates), incorporate it. Describe the methodology: automated reconnaissance (subdomain enumeration, port scanning, web crawling, technology fingerprinting), vulnerability correlation (CVE matching against detected technologies), exploit validation (confirmed exploitation attempts), and manual analysis. Mention the graph-based approach to mapping relationships between assets, vulnerabilities, and attack paths.
 
-- riskNarrative: Provide an in-depth analysis of the risk landscape. Start with the severity distribution of findings and what the distribution shape tells us (e.g., concentration in medium suggests systematic misconfigurations vs. a single critical suggesting a targeted vulnerability). Analyze the CVSS score distribution — where do scores cluster? What does the average CVSS score indicate? Discuss exploit availability: how many vulnerabilities have known public exploits? How many are in the CISA Known Exploited Vulnerabilities catalog? Detail any confirmed exploitation successes during the assessment — what was exploited, on which target, using what technique, and what level of access was achieved. Discuss attack chains: how vulnerabilities connect from technology to CVE to CWE to CAPEC, showing the progression from vulnerability to exploitable attack pattern. Address infrastructure risk: are servers directly exposed or CDN-fronted? What is the certificate health? Are security headers properly deployed?
+- riskNarrative: This is the DETAILED TECHNICAL ANALYSIS section. It expands on everything the Executive Summary only summarizes. It must be EXTENSIVE (8-12 paragraphs minimum). Structure as follows:
+
+  VULNERABILITY LANDSCAPE: Complete numerical breakdown: total vulnerability findings with per-severity counts (critical, high, medium, low), total known CVEs with their own per-severity breakdown (cveCriticalCount, cveHighCount, cveMediumCount, cveLowCount), average CVSS score. Explain what these numbers mean relative to the attack surface size.
+
+  CVSS DISTRIBUTION ANALYSIS: Where do CVSS scores cluster? What does the distribution shape tell us (concentration in medium suggests systematic misconfigurations vs. a single critical suggesting a targeted vulnerability)?
+
+  EXPLOITATION RESULTS: Detail EVERY confirmed exploitation success: for each, name the exact CVE exploited, the target IP address, the attack type/module used, and what access was achieved (RCE, file read, information disclosure). Call out CISA KEV entries by CVE ID. State the total exploitable count.
+
+  TECHNOLOGY & CVE ANALYSIS: Highlight the most concerning technologies: name each with version, associated CVE count, and highest-severity CVE. Describe complete attack chains (Technology to CVE to CWE to CAPEC) and what they reveal about exploitability.
+
+  INFRASTRUCTURE SECURITY POSTURE: Certificate health (valid vs expired vs self-signed), security header deployment (which headers present/missing, weighted coverage score), injectable parameter analysis (count and positions).
+
+  ATTACK SURFACE METRICS: Subdomains (active vs total), IPs (direct vs CDN-fronted), endpoints, parameters, open ports and services. Total graph nodes for scope context.
+
+  SECRETS & DATA EXPOSURE: GitHub secrets or sensitive files found: detail count and implications. If none, state that no credential exposure was detected.
+
+  Discuss how vulnerabilities connect from technology to CVE to CWE to CAPEC, showing the progression from vulnerability to exploitable attack pattern. Address infrastructure risk: are servers directly exposed or CDN-fronted?
 
 - findingsNarrative: Provide a detailed walkthrough of the most significant findings. Group and discuss findings by category (remote code execution, injection, misconfigurations, information disclosure, missing security controls, etc.). For each significant finding, describe: what was found, where it was found (target host/endpoint), the severity and CVSS score, which CVE IDs are associated, what CWE weakness category it falls under, whether an exploit exists, and what an attacker could achieve by exploiting it. Pay special attention to findings with confirmed exploits — describe the exploitation chain step by step. Discuss any GitHub secrets or sensitive files exposed. Compare the ratio of CVE-based findings (from known vulnerable software) versus scanner-detected findings versus chain-discovered findings to characterize the nature of the security issues.
 

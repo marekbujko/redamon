@@ -86,6 +86,22 @@ export interface ExploitSuccess {
   cveIds: string[]
 }
 
+export interface SubdomainMapping {
+  subdomain: string
+  ips: { address: string; version: string | null; isCdn: boolean; cdnName: string | null }[]
+  openPorts: number
+}
+
+export interface IpMapping {
+  ip: string
+  version: string | null
+  isCdn: boolean
+  cdnName: string | null
+  asn: string | null
+  hostnames: string[]
+  openPorts: number
+}
+
 export interface ReportData {
   project: Project
   remediations: Remediation[]
@@ -102,6 +118,8 @@ export interface ReportData {
       totalIps: number; ipv4: number; ipv6: number
       cdnCount: number; uniqueAsns: number; uniqueCdns: number
     }
+    subdomainMappings: SubdomainMapping[]
+    ipMappings: IpMapping[]
   }
 
   // Attack Surface
@@ -347,6 +365,30 @@ async function queryGraphOverview(session: any, pid: string) {
     { pid }
   )
 
+  // Subdomain → IP detail mapping
+  const subDetailRes = await session.run(
+    `MATCH (s:Subdomain {project_id: $pid})
+     OPTIONAL MATCH (s)-[:RESOLVES_TO]->(ip:IP)
+     OPTIONAL MATCH (ip)-[:HAS_PORT]->(port:Port)
+     RETURN s.name AS subdomain,
+            collect(DISTINCT {address: ip.address, version: ip.version, isCdn: ip.is_cdn, cdnName: ip.cdn_name}) AS ips,
+            count(DISTINCT port) AS openPorts
+     ORDER BY subdomain`,
+    { pid }
+  )
+  // IP → hostname detail mapping
+  const ipDetailRes = await session.run(
+    `MATCH (ip:IP {project_id: $pid})
+     OPTIONAL MATCH (s:Subdomain {project_id: $pid})-[:RESOLVES_TO]->(ip)
+     OPTIONAL MATCH (ip)-[:HAS_PORT]->(port:Port)
+     RETURN ip.address AS ip, ip.version AS version, ip.is_cdn AS isCdn,
+            ip.cdn_name AS cdnName, ip.asn AS asn,
+            collect(DISTINCT s.name) AS hostnames,
+            count(DISTINCT port) AS openPorts
+     ORDER BY ip`,
+    { pid }
+  )
+
   const nodeCounts = nodeRes.records.map((r: any) => ({
     label: r.get('label') as string,
     count: toNum(r.get('count')),
@@ -356,6 +398,27 @@ async function queryGraphOverview(session: any, pid: string) {
   const epRec = epRes.records[0]
   const certRec = certRes.records[0]
   const infraRec = infraRes.records[0]
+
+  const subdomainMappings: SubdomainMapping[] = subDetailRes.records.map((r: any) => ({
+    subdomain: r.get('subdomain') as string,
+    ips: (r.get('ips') as any[]).filter((ip: any) => ip.address != null).map((ip: any) => ({
+      address: ip.address as string,
+      version: ip.version as string | null,
+      isCdn: ip.isCdn === true,
+      cdnName: ip.cdnName as string | null,
+    })),
+    openPorts: toNum(r.get('openPorts')),
+  }))
+
+  const ipMappings: IpMapping[] = ipDetailRes.records.map((r: any) => ({
+    ip: r.get('ip') as string,
+    version: r.get('version') as string | null,
+    isCdn: r.get('isCdn') === true,
+    cdnName: r.get('cdnName') as string | null,
+    asn: r.get('asn') as string | null,
+    hostnames: (r.get('hostnames') as any[]).filter((h: any) => h != null),
+    openPorts: toNum(r.get('openPorts')),
+  }))
 
   return {
     totalNodes: nodeCounts.reduce((s: number, n: { count: number }) => s + n.count, 0),
@@ -379,6 +442,8 @@ async function queryGraphOverview(session: any, pid: string) {
           uniqueCdns: toNum(infraRec.get('uniqueCdns')),
         }
       : { totalIps: 0, ipv4: 0, ipv6: 0, cdnCount: 0, uniqueAsns: 0, uniqueCdns: 0 },
+    subdomainMappings,
+    ipMappings,
   }
 }
 

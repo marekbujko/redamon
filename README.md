@@ -1023,14 +1023,14 @@ For IP mode, public IPs are resolved via reverse DNS before evaluation. Private/
 
 RedAmon generates professional, client-ready penetration testing reports as self-contained HTML files. Reports compile all reconnaissance data, vulnerability findings, CVE intelligence, attack chain results, and remediation recommendations into an 11-section document ready for delivery.
 
-When an AI model is configured, six report sections receive **LLM-generated narratives**: an executive summary (8-12 paragraphs), scope analysis, risk interpretation, findings context, attack surface analysis, and an exhaustive prioritized remediation triage. If no LLM is available, the report is still generated with all data tables, charts, and metrics.
+When an AI model is configured, six report sections receive **LLM-generated narratives**: a concise executive summary (3–4 paragraphs), scope analysis, an extensive risk analysis (8–12 paragraphs), findings context, attack surface analysis, and an exhaustive prioritized remediation triage. If no LLM is available, the report is still generated with all data tables, charts, and metrics.
 
 | Section | Content |
 |---------|---------|
 | **Cover Page** | Project name, target domain, date, risk score badge, client info, confidentiality classification |
-| **Executive Summary** | Risk metrics cards, LLM narrative briefing covering vulnerability landscape, exploitation results, and business impact |
-| **Scope & Methodology** | Target domain, IPs, subdomains, endpoints, RoE details (if configured) |
-| **Risk Summary** | SVG security posture radar (6-axis), CVSS histogram, severity distribution, remediation status |
+| **Executive Summary** | Risk metrics cards, concise LLM narrative covering risk verdict, business impact, and top actions |
+| **Scope & Methodology** | Quick-glance KPIs, subdomain resolution map (or IP target map), target info, discovery summary, RoE |
+| **Risk Summary** | SVG security posture radar (6-axis), CVSS histogram, severity distribution, remediation status, extensive LLM risk analysis |
 | **Findings** | Remediation items grouped by severity with status badges, affected assets, and evidence |
 | **Other Vulnerability Details** | Raw scan output from Nuclei, GVM, and AI agent grouped by source |
 | **Attack Surface** | Technologies, security headers gap analysis, injectable parameters, services, ports, CDN coverage |
