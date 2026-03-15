@@ -590,6 +590,12 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 ---
 
+## Contact
+
+For questions, feedback, or collaboration inquiries: **devergo.sam@gmail.com**
+
+---
+
 ## Legal
 
 This project is released under the [MIT License](LICENSE).
