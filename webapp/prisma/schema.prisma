@@ -271,11 +271,11 @@ model Project {
   ffufSmartFuzz               Boolean  @default(true) @map("ffuf_smart_fuzz")
 
   // ========== ARJUN PARAMETER DISCOVERY ==========
-  arjunEnabled                Boolean  @default(false) @map("arjun_enabled")
+  arjunEnabled                Boolean  @default(true) @map("arjun_enabled")
   arjunThreads                Int      @default(2) @map("arjun_threads")
   arjunTimeout                Int      @default(15) @map("arjun_timeout")
   arjunScanTimeout            Int      @default(600) @map("arjun_scan_timeout")
-  arjunMethods                String[] @default(["GET"]) @map("arjun_methods")
+  arjunMethods                String[] @default(["GET", "POST"]) @map("arjun_methods")
   arjunMaxEndpoints           Int      @default(50) @map("arjun_max_endpoints")
   arjunChunkSize              Int      @default(500) @map("arjun_chunk_size")
   arjunRateLimit              Int      @default(0) @map("arjun_rate_limit")
@@ -307,7 +307,7 @@ model Project {
   gauFilterDeadEndpoints      Boolean  @default(true) @map("gau_filter_dead_endpoints")
 
   // ========== KITERUNNER API DISCOVERY ==========
-  kiterunnerEnabled           Boolean  @default(true) @map("kiterunner_enabled")
+  kiterunnerEnabled           Boolean  @default(false) @map("kiterunner_enabled")
   kiterunnerWordlists         String[] @default(["routes-large"]) @map("kiterunner_wordlists")
   kiterunnerRateLimit         Int      @default(100) @map("kiterunner_rate_limit")
   kiterunnerConnections       Int      @default(100) @map("kiterunner_connections")

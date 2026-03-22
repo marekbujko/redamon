@@ -263,11 +263,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'FFUF_SMART_FUZZ': True,
 
     # Arjun Parameter Discovery
-    'ARJUN_ENABLED': False,
+    'ARJUN_ENABLED': True,
     'ARJUN_THREADS': 2,
     'ARJUN_TIMEOUT': 15,
     'ARJUN_SCAN_TIMEOUT': 600,
-    'ARJUN_METHODS': ['GET'],
+    'ARJUN_METHODS': ['GET', 'POST'],
     'ARJUN_MAX_ENDPOINTS': 50,
     'ARJUN_CHUNK_SIZE': 500,
     'ARJUN_RATE_LIMIT': 0,
@@ -277,7 +277,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'ARJUN_CUSTOM_HEADERS': [],
 
     # Kiterunner API Discovery
-    'KITERUNNER_ENABLED': True,
+    'KITERUNNER_ENABLED': False,
     'KITERUNNER_WORDLISTS': ['routes-large'],
     'KITERUNNER_RATE_LIMIT': 100,
     'KITERUNNER_CONNECTIONS': 100,
