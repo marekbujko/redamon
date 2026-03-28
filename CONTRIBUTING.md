@@ -69,11 +69,17 @@ git remote add upstream https://github.com/samugit83/redamon.git
 
 # No .env file needed — all settings are configured from the webapp UI at /settings
 
+# Enable dev mode (one-time, creates a gitignored override file)
+cp docker-compose.dev.yml docker-compose.override.yml
+
+# Build all images and start core services
 docker compose --profile tools build
 docker compose up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp
 ```
 
-Open `http://localhost:3000` — you should see the dashboard. See the [README Quick Start](README.md#quick-start) for full details.
+Once the override file exists, all `docker compose` commands automatically use dev mode with Next.js hot-reload -- no `-f` flags needed.
+
+Open `http://localhost:3000` -- you should see the dashboard. See the [README Quick Start](README.md#quick-start) for full details.
 
 ### Step 1 — Find something to work on
 

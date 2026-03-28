@@ -9,6 +9,11 @@ import type { Conversation } from '@/hooks/useConversations'
 import type { ChatItem } from './types'
 import styles from './AIAssistantDrawer.module.css'
 
+interface GraphViewOption {
+  id: string
+  name: string
+}
+
 interface DrawerHeaderProps {
   status: ConnectionStatus
   reconnectAttempt: number
@@ -27,6 +32,9 @@ interface DrawerHeaderProps {
   handleSelectConversation: (conv: Conversation) => void
   handleDeleteConversation: (id: string) => void
   handleHistoryNewChat: () => void
+  graphViews?: GraphViewOption[]
+  selectedGraphViewId?: string | null
+  onSelectGraphView?: (id: string | null) => void
 }
 
 export function DrawerHeader({
@@ -47,6 +55,9 @@ export function DrawerHeader({
   handleSelectConversation,
   handleDeleteConversation,
   handleHistoryNewChat,
+  graphViews,
+  selectedGraphViewId,
+  onSelectGraphView,
 }: DrawerHeaderProps) {
   const getConnectionStatusColor = () =>
     status === ConnectionStatus.CONNECTED ? '#10b981' : '#ef4444'
@@ -145,6 +156,22 @@ export function DrawerHeader({
           </button>
         </div>
       </div>
+
+      {graphViews && graphViews.length > 0 && onSelectGraphView && (
+        <div className={styles.graphScopeBar}>
+          <span className={styles.graphScopeLabel}>Graph scope:</span>
+          <select
+            className={styles.graphScopeSelect}
+            value={selectedGraphViewId || ''}
+            onChange={e => onSelectGraphView(e.target.value || null)}
+          >
+            <option value="">Whole Graph</option>
+            {graphViews.map(v => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {showHistory && (
         <ConversationHistory

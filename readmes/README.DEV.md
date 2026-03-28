@@ -602,14 +602,29 @@ Settings have defaults defined in **four layers** that must stay in sync:
 ```bash
 git clone https://github.com/samugit83/redamon.git
 cd redamon
-docker compose up -d           # Start all services
+
+# Enable dev mode (one-time, creates a gitignored override file)
+cp docker-compose.dev.yml docker-compose.override.yml
+
+# Build all images
+docker compose --profile tools build
+
+# Start core services (without GVM):
+docker compose up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp
+
+# Or start all services (with GVM):
+docker compose up -d
 ```
 
-- **First run**: GVM feed sync takes **~10–15 minutes**. All other services are ready immediately.
+Once the override file exists, all `docker compose` commands automatically use dev mode with Next.js hot-reload -- no `-f` flags needed. To switch back to production mode: `rm docker-compose.override.yml`
+
+- **First run with GVM**: feed sync takes **~30 minutes**. All other services are ready immediately.
 - Access the webapp at **http://localhost:3000**.
 - Create a user account.
-- Configure your LLM provider API key and other settings in the webapp at `/settings` (Global Settings page). No `.env` file is needed — all API keys, tunnel credentials, and tool settings are configured from the UI.
+- Configure your LLM provider API key and other settings in the webapp at `/settings` (Global Settings page). No `.env` file is needed -- all API keys, tunnel credentials, and tool settings are configured from the UI.
 - Create a project, set a target domain, and you're ready to go.
+
+> **Not a developer?** Use `./redamon.sh install` for a single-command production setup. See the [README Quick Start](../README.md#quick-start).
 
 **Verify everything is running:**
 

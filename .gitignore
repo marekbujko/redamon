@@ -150,5 +150,8 @@ readmes/agent_prompts/
 LAUNCH.md
 TODO.INTERNAL.md
 
+# RedAmon local config (created by redamon.sh)
+.redamon
+
 # Claude Code config
 .claude/

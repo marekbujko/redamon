@@ -55,6 +55,7 @@ export interface InitPayload {
   user_id: string
   project_id: string
   session_id: string
+  graph_view_cypher?: string
 }
 
 export interface QueryPayload {

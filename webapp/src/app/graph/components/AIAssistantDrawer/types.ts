@@ -52,4 +52,5 @@ export interface AIAssistantDrawerProps {
   onToggleOtherChains?: () => void
   hasOtherChains?: boolean
   requireToolConfirmation?: boolean
+  graphViews?: Array<{ id: string; name: string; cypherQuery: string }>
 }

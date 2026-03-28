@@ -844,6 +844,165 @@ async def register_non_msf_session(body: dict):
 
 
 # =============================================================================
+# TEXT-TO-CYPHER — Generate Cypher from natural language using existing prompt
+# =============================================================================
+
+class TextToCypherRequest(BaseModel):
+    """Request model for text-to-cypher conversion."""
+    question: str
+    user_id: str
+    project_id: str
+
+
+@app.post("/text-to-cypher", tags=["Graph"])
+async def text_to_cypher(body: TextToCypherRequest):
+    """
+    Generate a Cypher query from a natural language description.
+
+    Reuses the TEXT_TO_CYPHER_SYSTEM prompt and Neo4jToolManager._generate_cypher()
+    so the graph schema is always in sync with the agent's query_graph tool.
+
+    Returns the raw Cypher (without tenant filters) for the webapp to save and execute.
+    """
+    from tools import Neo4jToolManager
+    from orchestrator_helpers.llm_setup import setup_llm, _resolve_provider_key
+    from project_settings import DEFAULT_AGENT_SETTINGS, fetch_agent_settings
+    import requests as _requests
+
+    # 1. Resolve LLM for the user
+    llm = None
+
+    # Try to get project-specific model first
+    model_name = DEFAULT_AGENT_SETTINGS['OPENAI_MODEL']
+    try:
+        webapp_url = os.environ.get('WEBAPP_API_URL', 'http://webapp:3000')
+        settings = fetch_agent_settings(body.project_id, webapp_url)
+        if settings and settings.get('OPENAI_MODEL'):
+            model_name = settings['OPENAI_MODEL']
+    except Exception as e:
+        logger.warning(f"text-to-cypher: failed to fetch project settings: {e}")
+
+    # Fetch user's LLM providers for API keys
+    user_providers = []
+    try:
+        webapp_url = os.environ.get('WEBAPP_API_URL', 'http://webapp:3000')
+        resp = _requests.get(
+            f"{webapp_url.rstrip('/')}/api/users/{body.user_id}/llm-providers?internal=true",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        user_providers = resp.json()
+    except Exception as e:
+        logger.warning(f"text-to-cypher: failed to fetch user LLM providers: {e}")
+
+    openai_p = _resolve_provider_key(user_providers, "openai")
+    anthropic_p = _resolve_provider_key(user_providers, "anthropic")
+    openrouter_p = _resolve_provider_key(user_providers, "openrouter")
+
+    try:
+        # Check if model uses custom provider config
+        if model_name.startswith("custom/"):
+            config_id = model_name[len("custom/"):]
+            matched = None
+            for p in user_providers:
+                if p.get("id") == config_id:
+                    matched = p
+                    break
+            if not matched and user_providers:
+                matched = user_providers[0]
+            if matched:
+                llm = setup_llm(model_name, custom_llm_config=matched)
+            else:
+                return JSONResponse(
+                    content={"error": "Custom LLM provider not found. Configure an AI model in settings."},
+                    status_code=400,
+                )
+        else:
+            llm = setup_llm(
+                model_name,
+                openai_api_key=(openai_p or {}).get("apiKey"),
+                anthropic_api_key=(anthropic_p or {}).get("apiKey"),
+                openrouter_api_key=(openrouter_p or {}).get("apiKey"),
+            )
+    except Exception as e:
+        logger.error(f"text-to-cypher: failed to create LLM: {e}")
+        return JSONResponse(
+            content={"error": f"Failed to initialize LLM: {str(e)}. Make sure an AI model is configured."},
+            status_code=400,
+        )
+
+    if not llm:
+        return JSONResponse(
+            content={"error": "No LLM configured. Configure an AI model in project settings to use graph views."},
+            status_code=400,
+        )
+
+    # 2. Create Neo4jToolManager and generate Cypher
+    neo4j_uri = os.environ.get('NEO4J_URI', 'bolt://neo4j:7687')
+    neo4j_user = os.environ.get('NEO4J_USER', 'neo4j')
+    neo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')
+
+    manager = Neo4jToolManager(neo4j_uri, neo4j_user, neo4j_password, llm)
+
+    try:
+        from langchain_community.graphs import Neo4jGraph
+        manager.graph = Neo4jGraph(
+            url=neo4j_uri,
+            username=neo4j_user,
+            password=neo4j_password,
+        )
+    except Exception as e:
+        logger.error(f"text-to-cypher: failed to connect to Neo4j: {e}")
+        return JSONResponse(
+            content={"error": f"Failed to connect to graph database: {str(e)}"},
+            status_code=500,
+        )
+
+    # 3. Generate Cypher with retry logic
+    last_error = None
+    last_cypher = None
+    cypher = None
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            if attempt == 0:
+                cypher = await manager._generate_cypher(body.question)
+            else:
+                cypher = await manager._generate_cypher(
+                    body.question,
+                    previous_error=last_error,
+                    previous_cypher=last_cypher,
+                )
+
+            # Validate by executing (with tenant filter) to catch syntax errors
+            filtered = manager._inject_tenant_filter(cypher, body.user_id, body.project_id)
+            manager.graph.query(
+                filtered,
+                params={
+                    "tenant_user_id": body.user_id,
+                    "tenant_project_id": body.project_id,
+                },
+            )
+
+            # Return the raw (un-filtered) Cypher for saving
+            return JSONResponse(content={"cypher": cypher})
+
+        except Exception as e:
+            last_error = str(e)
+            last_cypher = cypher
+            logger.warning(f"text-to-cypher attempt {attempt + 1} failed: {last_error}")
+
+            if attempt == max_retries - 1:
+                return JSONResponse(
+                    content={"error": f"Failed to generate valid Cypher after {max_retries} attempts: {last_error}"},
+                    status_code=422,
+                )
+
+    return JSONResponse(content={"error": "Unexpected end of retry loop"}, status_code=500)
+
+
+# =============================================================================
 # KALI TERMINAL — WebSocket PTY proxy to kali-sandbox terminal server
 # =============================================================================
 

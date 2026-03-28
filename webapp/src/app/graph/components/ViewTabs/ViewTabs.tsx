@@ -1,10 +1,10 @@
 'use client'
 
 import { memo } from 'react'
-import { Waypoints, Table2, Terminal, Shield, Search, Download, SquareTerminal } from 'lucide-react'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, SquareTerminal, Eye } from 'lucide-react'
 import styles from './ViewTabs.module.css'
 
-export type ViewMode = 'graph' | 'table' | 'sessions' | 'terminal' | 'roe'
+export type ViewMode = 'graph' | 'graphViews' | 'table' | 'sessions' | 'terminal' | 'roe'
 
 export interface TunnelInfo {
   active: boolean
@@ -27,6 +27,8 @@ interface ViewTabsProps {
   onExport?: () => void
   totalRows?: number
   filteredRows?: number
+  // Graph views badge
+  viewCount?: number
   // Sessions badge
   sessionCount?: number
   // Tunnel status
@@ -41,6 +43,7 @@ export const ViewTabs = memo(function ViewTabs({
   onExport,
   totalRows,
   filteredRows,
+  viewCount,
   sessionCount,
   tunnelStatus,
 }: ViewTabsProps) {
@@ -55,6 +58,18 @@ export const ViewTabs = memo(function ViewTabs({
         >
           <Waypoints size={14} />
           <span>Graph Map</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeView === 'graphViews'}
+          className={`${styles.tab} ${activeView === 'graphViews' ? styles.tabActive : ''}`}
+          onClick={() => onViewChange('graphViews')}
+        >
+          <Eye size={14} />
+          <span>Graph Views</span>
+          {viewCount != null && viewCount > 0 && (
+            <span className={styles.badge}>{viewCount}</span>
+          )}
         </button>
         <button
           role="tab"

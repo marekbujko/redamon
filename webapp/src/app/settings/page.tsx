@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords, RotateCw } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords, RotateCw, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
+import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { LlmProviderForm } from '@/components/settings/LlmProviderForm'
 import type { ProviderData } from '@/components/settings/LlmProviderForm'
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
@@ -1004,6 +1005,182 @@ export default function SettingsPage() {
           </span>
         </div>
       </Modal>
+
+      {/* Section 5: System (not user-scoped) */}
+      <SystemSection />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// System Section (version info + update check)
+// ---------------------------------------------------------------------------
+
+function SystemSection() {
+  const { currentVersion, latestVersion, changelog, updateAvailable, loading, checkForUpdates } = useVersionCheck()
+
+  const [copied, setCopied] = useState(false)
+  const [expandedVersions, setExpandedVersions] = useState<Set<string>>(new Set())
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText('./redamon.sh update').then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }, [])
+
+  const toggleVersion = (version: string) => {
+    setExpandedVersions(prev => {
+      const next = new Set(prev)
+      if (next.has(version)) next.delete(version)
+      else next.add(version)
+      return next
+    })
+  }
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <h2 className={styles.sectionTitle}><Info size={16} /> System</h2>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Version info */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+            Current version: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>v{currentVersion}</strong>
+          </span>
+
+          {latestVersion && !updateAvailable && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px',
+              background: 'var(--status-success-bg)', color: 'var(--status-success-text)',
+            }}>
+              Up to date
+            </span>
+          )}
+
+          {updateAvailable && latestVersion && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px',
+              background: 'var(--status-warning-bg)', color: 'var(--status-warning-text)',
+            }}>
+              v{latestVersion} available
+            </span>
+          )}
+
+          <button
+            className="secondaryButton"
+            onClick={checkForUpdates}
+            disabled={loading}
+            style={{ marginLeft: 'auto', fontSize: '12px', padding: '4px 10px' }}
+          >
+            {loading ? <Loader2 size={12} className={styles.spin} /> : <RefreshCw size={12} />}
+            Check for Updates
+          </button>
+        </div>
+
+        {/* Update available: show command + changelog */}
+        {updateAvailable && (
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '8px',
+              padding: '8px 12px', background: 'var(--bg-primary)',
+              border: '1px solid var(--border-default)', borderRadius: '6px',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              <code style={{ flex: 1, fontSize: '13px', color: 'var(--color-success)' }}>
+                ./redamon.sh update
+              </code>
+              <button
+                onClick={handleCopy}
+                title="Copy command"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '4px', background: 'none', border: '1px solid var(--border-default)',
+                  borderRadius: '4px', color: 'var(--text-tertiary)', cursor: 'pointer',
+                }}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            </div>
+
+            {/* Changelog */}
+            {changelog && changelog.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Changes since v{currentVersion}:
+                </span>
+                <div style={{
+                  maxHeight: '250px', overflowY: 'auto',
+                  border: '1px solid var(--border-default)', borderRadius: '6px',
+                  background: 'var(--bg-primary)',
+                }}>
+                  {changelog.map((entry: { version: string; date: string; sections: { title: string; items: string[] }[] }) => {
+                    const isExpanded = expandedVersions.has(entry.version)
+                    return (
+                      <div key={entry.version} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleVersion(entry.version)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '6px',
+                            width: '100%', padding: '6px 10px', background: 'none',
+                            border: 'none', cursor: 'pointer', fontSize: '12px',
+                            color: 'var(--text-primary)', textAlign: 'left',
+                          }}
+                        >
+                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          <strong style={{ fontFamily: 'var(--font-mono)' }}>v{entry.version}</strong>
+                          <span style={{ color: 'var(--text-tertiary)', fontSize: '11px', marginLeft: 'auto' }}>{entry.date}</span>
+                        </button>
+                        {isExpanded && (
+                          <div style={{ padding: '0 10px 8px 28px' }}>
+                            {entry.sections.map((section: { title: string; items: string[] }) => (
+                              <div key={section.title} style={{ marginTop: '4px' }}>
+                                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                  {section.title}
+                                </div>
+                                <ul style={{ margin: '2px 0 0', paddingLeft: '16px', listStyle: 'disc' }}>
+                                  {section.items.map((item: string, i: number) => (
+                                    <li key={i} style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Links */}
+        <div style={{ display: 'flex', gap: '12px', fontSize: '11px' }}>
+          <a
+            href="https://github.com/samugit83/redamon/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-tertiary)', textDecoration: 'none' }}
+          >
+            <ExternalLink size={11} /> Releases
+          </a>
+          <a
+            href="https://github.com/samugit83/redamon/blob/master/CHANGELOG.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-tertiary)', textDecoration: 'none' }}
+          >
+            <ExternalLink size={11} /> Changelog
+          </a>
+        </div>
+      </div>
     </div>
   )
 }

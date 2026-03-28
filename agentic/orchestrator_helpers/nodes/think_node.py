@@ -42,12 +42,12 @@ from prompts import (
     build_tool_args_section,
 )
 from utils import get_session_config_prompt
-from tools import set_tenant_context, set_phase_context
+from tools import set_tenant_context, set_phase_context, set_graph_view_context
 
 logger = logging.getLogger(__name__)
 
 
-async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_creds, streaming_callbacks=None) -> dict:
+async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_creds, streaming_callbacks=None, graph_view_cyphers=None) -> dict:
     """
     Core ReAct reasoning node.
 
@@ -76,6 +76,8 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
     # Set context for tools
     set_tenant_context(user_id, project_id)
     set_phase_context(phase)
+    if graph_view_cyphers:
+        set_graph_view_context(graph_view_cyphers.get(session_id))
 
     # Get current objective from conversation objectives
     objectives = state.get("conversation_objectives", [])

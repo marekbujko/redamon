@@ -2047,6 +2047,45 @@ td:hover .tableCellCopyButton {
   50% { opacity: 1; }
 }
 
+/* Graph scope selector bar */
+.graphScopeBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.graphScopeLabel {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.graphScopeSelect {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.graphScopeSelect:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.graphScopeSelect option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 /* Tool args preview in confirmation dialog */
 .toolArgsPreview {
   background: rgba(0, 0, 0, 0.3);

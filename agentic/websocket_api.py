@@ -83,6 +83,7 @@ class InitMessage(BaseModel):
     user_id: str
     project_id: str
     session_id: str
+    graph_view_cypher: Optional[str] = None
 
 
 class QueryMessage(BaseModel):
@@ -124,6 +125,7 @@ class WebSocketConnection:
         self.user_id: Optional[str] = None
         self.project_id: Optional[str] = None
         self.session_id: Optional[str] = None
+        self.graph_view_cypher: Optional[str] = None
         self.authenticated = False
         self.connected_at = datetime.utcnow()
         self.last_ping = datetime.utcnow()
@@ -618,6 +620,9 @@ class WebSocketHandler:
                 init_msg.session_id
             )
 
+            # Store graph view scope (if provided)
+            connection.graph_view_cypher = init_msg.graph_view_cypher
+
             # Send connected confirmation
             await connection.send_message(MessageType.CONNECTED, {
                 "session_id": init_msg.session_id,
@@ -685,6 +690,7 @@ class WebSocketHandler:
                 session_id=connection.session_id,
                 streaming_callback=callback,
                 guidance_queue=connection.guidance_queue,
+                graph_view_cypher=connection.graph_view_cypher,
             )
             logger.info(f"Query completed for session {connection.session_id}")
         except asyncio.CancelledError:

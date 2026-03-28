@@ -393,7 +393,10 @@ services:
   # ===========================================================================
 
   webapp:
-    build: ./webapp
+    build:
+      context: ./webapp
+      args:
+        REDAMON_VERSION: "${REDAMON_VERSION:-0.0.0}"
     container_name: redamon-webapp
     ports:
       - "${WEBAPP_PORT:-3000}:3000"
@@ -426,6 +429,7 @@ services:
       - ./github_secret_hunt/output:/data/github-hunt-output:ro
       - ./trufflehog_scan/output:/data/trufflehog-output:ro
       - report_data:/data/reports
+      - ./VERSION:/app/VERSION:ro
     depends_on:
       postgres:
         condition: service_healthy

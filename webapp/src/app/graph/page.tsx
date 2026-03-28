@@ -15,7 +15,8 @@ import { DataTable } from './components/DataTable'
 import { ActiveSessions } from './components/ActiveSessions'
 import { RoeViewer } from './components/RoeViewer'
 import { KaliTerminal } from './components/KaliTerminal'
-import { useGraphData, useDimensions, useNodeSelection, useTableData } from './hooks'
+import { GraphViews } from './components/GraphViews'
+import { useGraphData, useDimensions, useNodeSelection, useTableData, useGraphViews } from './hooks'
 import { exportToExcel } from './utils/exportExcel'
 import { useTheme, useSession, useReconStatus, useReconSSE, useGvmStatus, useGvmSSE, useGithubHuntStatus, useGithubHuntSSE, useTrufflehogStatus, useTrufflehogSSE, useActiveSessions } from '@/hooks'
 import { useProjectById } from '@/hooks/useProjects'
@@ -76,6 +77,9 @@ export default function GraphPage() {
   }, [])
   const { isDark } = useTheme()
   const { sessionId, resetSession, switchSession } = useSession()
+
+  // Graph views for the Graph Views tab + AI drawer scope selector
+  const { views: graphViews } = useGraphViews(projectId)
 
   // Agent status polling — lightweight fetch every 5s for toolbar indicators
   const [agentSummary, setAgentSummary] = useState<{
@@ -883,6 +887,7 @@ export default function GraphPage() {
         onExport={handleExportExcel}
         totalRows={filteredByType.length}
         filteredRows={textFilteredCount}
+        viewCount={graphViews.length}
         sessionCount={activeSessions.totalCount}
         tunnelStatus={tunnelStatus}
       />
@@ -912,6 +917,15 @@ export default function GraphPage() {
               onNodeClick={selectNode}
               isDark={isDark}
               activeChainId={sessionId}
+            />
+          ) : activeView === 'graphViews' ? (
+            <GraphViews
+              projectId={projectId || ''}
+              userId={userId || ''}
+              modelConfigured={!!currentProject?.agentOpenaiModel}
+              is3D={is3D}
+              showLabels={showLabels}
+              isDark={isDark}
             />
           ) : activeView === 'table' ? (
             <DataTable
@@ -1027,6 +1041,7 @@ export default function GraphPage() {
         onToggleOtherChains={handleToggleOtherChains}
         hasOtherChains={sessionChainIds.length > 1 || (sessionChainIds.length === 1 && sessionChainIds[0] !== sessionId)}
         requireToolConfirmation={currentProject?.agentRequireToolConfirmation ?? true}
+        graphViews={graphViews}
       />
 
       <ReconConfirmModal

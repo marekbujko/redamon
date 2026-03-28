@@ -22,6 +22,7 @@ services:
       - ./mcp/nuclei-templates:/data/nuclei-templates:rw
       - ./gvm_scan/output:/data/gvm-output:ro
       - ./github_secret_hunt/output:/data/github-hunt-output:ro
+      - ./VERSION:/app/VERSION:ro
 
 volumes:
   webapp_node_modules:

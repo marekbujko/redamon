@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 current_user_id: ContextVar[str] = ContextVar('current_user_id', default='')
 current_project_id: ContextVar[str] = ContextVar('current_project_id', default='')
 current_phase: ContextVar[str] = ContextVar('current_phase', default='informational')
+current_graph_view_cypher: ContextVar[Optional[str]] = ContextVar('current_graph_view_cypher', default=None)
 
 
 def set_tenant_context(user_id: str, project_id: str) -> None:
@@ -44,6 +45,16 @@ def set_tenant_context(user_id: str, project_id: str) -> None:
 def set_phase_context(phase: str) -> None:
     """Set the current phase context for tool restrictions."""
     current_phase.set(phase)
+
+
+def set_graph_view_context(cypher: Optional[str]) -> None:
+    """Set the active graph view Cypher for scoped queries."""
+    current_graph_view_cypher.set(cypher)
+
+
+def get_graph_view_context() -> Optional[str]:
+    """Get the active graph view Cypher template."""
+    return current_graph_view_cypher.get()
 
 
 def get_phase_context() -> str:
@@ -226,7 +237,8 @@ class Neo4jToolManager:
         self,
         question: str,
         previous_error: str = None,
-        previous_cypher: str = None
+        previous_cypher: str = None,
+        view_cypher: str = None,
     ) -> str:
         """
         Use LLM to generate a Cypher query from natural language.
@@ -268,11 +280,21 @@ Common fixes:
 - Verify relationship types exist in the schema
 """
 
+        view_scope = ""
+        if view_cypher:
+            view_scope = f"""
+## Active Graph View Scope
+The user is working within a filtered subgraph defined by this Cypher query:
+{view_cypher}
+Your query MUST only return results that exist within this subgraph.
+Incorporate the filter pattern into your MATCH clauses so results are scoped appropriately.
+"""
+
         prompt = f"""{TEXT_TO_CYPHER_SYSTEM}
 
 ## Current Database Schema
 {schema}
-{error_context}
+{error_context}{view_scope}
 ## Important Rules
 - Generate ONLY the Cypher query, no explanations
 - Do NOT include user_id or project_id filters - they will be added automatically
@@ -342,6 +364,11 @@ Cypher Query:"""
                 if not user_id or not project_id:
                     return "Error: Missing user_id or project_id context"
 
+                # Check if a graph view scope is active
+                view_cypher = get_graph_view_context()
+                if view_cypher:
+                    logger.info(f"[{user_id}/{project_id}] Using graph view scope for query")
+
                 logger.info(f"[{user_id}/{project_id}] Generating Cypher for: {question[:50]}...")
 
                 last_error = None
@@ -351,13 +378,14 @@ Cypher Query:"""
                     try:
                         # Step 1: Generate Cypher from natural language (with error context on retry)
                         if attempt == 0:
-                            cypher = await manager._generate_cypher(question)
+                            cypher = await manager._generate_cypher(question, view_cypher=view_cypher)
                         else:
                             logger.info(f"[{user_id}/{project_id}] Retry {attempt}/{get_setting('CYPHER_MAX_RETRIES', 3) - 1}: Regenerating Cypher...")
                             cypher = await manager._generate_cypher(
                                 question,
                                 previous_error=last_error,
-                                previous_cypher=last_cypher
+                                previous_cypher=last_cypher,
+                                view_cypher=view_cypher,
                             )
 
                         logger.info(f"[{user_id}/{project_id}] Generated Cypher (attempt {attempt + 1}): {cypher}")

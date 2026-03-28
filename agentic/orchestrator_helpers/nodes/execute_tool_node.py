@@ -9,7 +9,7 @@ import httpx
 from state import AgentState
 from orchestrator_helpers.json_utils import json_dumps_safe
 from orchestrator_helpers.config import get_identifiers
-from tools import set_tenant_context, set_phase_context
+from tools import set_tenant_context, set_phase_context, set_graph_view_context
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ async def execute_tool_node(
     tool_executor,
     streaming_callbacks,
     session_manager_base,
+    graph_view_cyphers=None,
 ) -> dict:
     """
     Execute the selected tool.
@@ -71,6 +72,8 @@ async def execute_tool_node(
     # Set context
     set_tenant_context(user_id, project_id)
     set_phase_context(phase)
+    if graph_view_cyphers:
+        set_graph_view_context(graph_view_cyphers.get(session_id))
 
     # RoE enforcement: tool restrictions are handled via agentToolPhaseMap
     # (is_tool_allowed_in_phase already blocks tools with empty/missing phases).

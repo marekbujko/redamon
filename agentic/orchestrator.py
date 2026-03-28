@@ -98,6 +98,7 @@ class AgentOrchestrator:
         # don't overwrite each other's callback / guidance queue.
         self._streaming_callbacks: dict[str, object] = {}
         self._guidance_queues: dict[str, asyncio.Queue] = {}
+        self._graph_view_cyphers: dict[str, str | None] = {}
 
         # Metasploit prewarm: background restart tasks keyed by session_key
         self._prewarm_tasks: dict[str, asyncio.Task] = {}
@@ -348,13 +349,13 @@ class AgentOrchestrator:
             return await initialize_node(state, config, llm=self.llm, neo4j_creds=neo4j_creds)
 
         async def _think(state, config=None):
-            return await think_node(state, config, llm=self.llm, guidance_queues=self._guidance_queues, neo4j_creds=neo4j_creds, streaming_callbacks=self._streaming_callbacks)
+            return await think_node(state, config, llm=self.llm, guidance_queues=self._guidance_queues, neo4j_creds=neo4j_creds, streaming_callbacks=self._streaming_callbacks, graph_view_cyphers=self._graph_view_cyphers)
 
         async def _execute_tool(state, config=None):
-            return await execute_tool_node(state, config, tool_executor=self.tool_executor, streaming_callbacks=self._streaming_callbacks, session_manager_base=_SESSION_MANAGER_BASE)
+            return await execute_tool_node(state, config, tool_executor=self.tool_executor, streaming_callbacks=self._streaming_callbacks, session_manager_base=_SESSION_MANAGER_BASE, graph_view_cyphers=self._graph_view_cyphers)
 
         async def _execute_plan(state, config=None):
-            return await execute_plan_node(state, config, tool_executor=self.tool_executor, streaming_callbacks=self._streaming_callbacks, session_manager_base=_SESSION_MANAGER_BASE)
+            return await execute_plan_node(state, config, tool_executor=self.tool_executor, streaming_callbacks=self._streaming_callbacks, session_manager_base=_SESSION_MANAGER_BASE, graph_view_cyphers=self._graph_view_cyphers)
 
         async def _await_approval(state, config=None):
             return await await_approval_node(state, config)
@@ -757,7 +758,8 @@ class AgentOrchestrator:
         project_id: str,
         session_id: str,
         streaming_callback,
-        guidance_queue=None
+        guidance_queue=None,
+        graph_view_cypher=None,
     ) -> InvokeResponse:
         """
         Invoke agent with streaming callbacks for real-time updates.
@@ -791,9 +793,10 @@ class AgentOrchestrator:
 
         logger.info(f"[{user_id}/{project_id}/{session_id}] Invoking with streaming: {question[:10000]}")
 
-        # Store streaming callback and guidance queue per-session
+        # Store streaming callback, guidance queue, and graph view scope per-session
         self._streaming_callbacks[session_id] = streaming_callback
         self._guidance_queues[session_id] = guidance_queue
+        self._graph_view_cyphers[session_id] = graph_view_cypher
 
         try:
             config = create_config(user_id, project_id, session_id)
@@ -834,6 +837,7 @@ class AgentOrchestrator:
         finally:
             self._streaming_callbacks.pop(session_id, None)
             self._guidance_queues.pop(session_id, None)
+            self._graph_view_cyphers.pop(session_id, None)
 
     async def resume_after_approval_with_streaming(
         self,
@@ -910,6 +914,7 @@ class AgentOrchestrator:
         finally:
             self._streaming_callbacks.pop(session_id, None)
             self._guidance_queues.pop(session_id, None)
+            self._graph_view_cyphers.pop(session_id, None)
 
     async def resume_after_answer_with_streaming(
         self,
@@ -984,6 +989,7 @@ class AgentOrchestrator:
         finally:
             self._streaming_callbacks.pop(session_id, None)
             self._guidance_queues.pop(session_id, None)
+            self._graph_view_cyphers.pop(session_id, None)
 
     async def resume_after_tool_confirmation(
         self,
@@ -1108,6 +1114,7 @@ class AgentOrchestrator:
         finally:
             self._streaming_callbacks.pop(session_id, None)
             self._guidance_queues.pop(session_id, None)
+            self._graph_view_cyphers.pop(session_id, None)
 
     async def resume_execution_with_streaming(
         self,
@@ -1174,6 +1181,7 @@ class AgentOrchestrator:
         finally:
             self._streaming_callbacks.pop(session_id, None)
             self._guidance_queues.pop(session_id, None)
+            self._graph_view_cyphers.pop(session_id, None)
 
     async def close(self) -> None:
         """Clean up resources."""

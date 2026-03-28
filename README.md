@@ -113,100 +113,114 @@ That's it. No Node.js, Python, or security tools needed on your host.
 > **With OpenVAS** adds 4 more runtime containers (gvmd, ospd-openvas, gvm-postgres, gvm-redis) plus ~8 one-shot data-init containers for vulnerability feeds (~170K+ NVTs). First launch takes ~30 minutes for GVM feed synchronization.
 > Dynamic recon and scan containers are spawned on-demand during operations and require additional resources.
 
-### 1. Clone & Configure
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/samugit83/redamon.git
 cd redamon
+
+# Without GVM (lighter, faster startup):
+./redamon.sh install
+
+# With GVM / OpenVAS (full stack, ~30 min first run):
+./redamon.sh install --gvm
 ```
 
-After starting the stack, open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed — all configuration is done from the UI.
+The script builds all images and starts the services. When done, open **http://localhost:3000**.
 
-- **LLM Providers** — add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
-- **API Keys** — Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). Supports **key rotation** — configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
-- **Tunneling** — configure ngrok or chisel for reverse shell tunneling. Changes apply immediately without container restarts.
+### 2. Configure
+
+Open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed.
+
+- **LLM Providers** -- add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
+- **API Keys** -- Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). Supports **key rotation** -- configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
+- **Tunneling** -- configure ngrok or chisel for reverse shell tunneling. Changes apply immediately without container restarts.
 
 All settings are stored per-user in the database. See the **[AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)** wiki page for detailed setup instructions.
 
-### 2. Build & Start
-
-**Without GVM (lighter, faster startup):**
-```bash
-docker compose --profile tools build          # Build all images
-docker compose up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp   # Start core services only
-```
-
-**Complete, With GVM:**
-```bash
-docker compose --profile tools build          # Build all images (recon + vuln-scanner + services)
-docker compose up -d                          # Start all services (first GVM run takes ~30 min for feed sync)
-                                              # Total image size: ~15 GB
-```
-
-
 ### 3. Open the Webapp
 
-Go to **http://localhost:3000** — create a project, configure your target, and start scanning.
+Go to **http://localhost:3000** -- create a project, configure your target, and start scanning.
 
 > For a detailed walkthrough of every feature, check the **[Wiki](https://github.com/samugit83/redamon/wiki)**.
 >
 > Having issues? See the **[Troubleshooting](readmes/TROUBLESHOOTING.md)** guide or the **[Wiki Troubleshooting](https://github.com/samugit83/redamon/wiki/Troubleshooting)** page.
 
-### Common Commands
+### Management Commands
 
-```bash
-docker compose ps                           # Check service status
-docker compose logs -f                      # Follow all logs
-docker compose logs -f webapp               # Webapp (Next.js)
-docker compose logs -f agent                # AI agent orchestrator
-docker compose logs -f recon-orchestrator   # Recon orchestrator
-docker compose logs -f kali-sandbox         # MCP tool servers
-docker compose logs -f gvmd                 # GVM vulnerability scanner daemon
-docker compose logs -f neo4j                # Neo4j graph database
-docker compose logs -f postgres             # PostgreSQL database
+All lifecycle management is handled by a single script:
 
-# Stop services without removing volumes (preserves all data, fast restart)
-docker compose down
+| Command | Description |
+|---------|-------------|
+| `./redamon.sh install` | Build + start without GVM |
+| `./redamon.sh install --gvm` | Build + start with GVM/OpenVAS |
+| `./redamon.sh update` | Pull latest version, smart-rebuild only changed services |
+| `./redamon.sh up` | Start services (auto-detects GVM mode) |
+| `./redamon.sh down` | Stop services (preserves data) |
+| `./redamon.sh status` | Show running services, version, GVM mode |
+| `./redamon.sh clean` | Remove containers + images, keep data |
+| `./redamon.sh purge` | Remove everything including all data |
 
-# Stop and remove locally built images (forces rebuild on next start)
-docker compose --profile tools down --rmi local
+The `update` command pulls the latest code from GitHub, detects which Dockerfiles/source changed, rebuilds only the affected images, and restarts the updated services. Volumes (databases, scan results, reports) are never deleted.
 
-# Full cleanup: remove all containers, images, and volumes (destroys all data!)
-docker compose --profile tools down --rmi local --volumes --remove-orphans
-```
+The webapp also checks for updates automatically and shows a notification in the UI when a new version is available.
 
 ### Development Mode
 
-For active development with **Next.js fast refresh** (no rebuild on every change):
+For contributors and active development with **Next.js fast refresh**:
 
-**Without GVM (lighter, faster startup):**
+**Build tool images:**
+```bash
+docker compose --profile tools build
+```
+
+**Start dev environment (without GVM):**
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp
-
 ```
-**Complete, With GVM:**
+
+**Start dev environment (with GVM):**
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-Both commands swap the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
+The dev override swaps the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
 
-**Refreshing Python services after code changes:**
+#### When to Rebuild vs Restart
 
-The Python services (`agent`, `recon-orchestrator`, `kali-sandbox`) already have their source code volume-mounted, so files are synced live. However, the running Python process won't pick up changes until you restart the container:
+| What changed | Action needed |
+|-------------|---------------|
+| `webapp/src/` (frontend code) | Nothing -- Next.js hot-reload handles it in dev mode |
+| `agentic/*.py` (agent Python code) | `docker compose restart agent` |
+| `recon_orchestrator/*.py` | `docker compose restart recon-orchestrator` |
+| `mcp/servers/*.py` (MCP servers) | `docker compose restart kali-sandbox` |
+| `agentic/Dockerfile` or `agentic/requirements.txt` | `docker compose build agent && docker compose up -d agent` |
+| `recon_orchestrator/Dockerfile` or its `requirements.txt` | `docker compose build recon-orchestrator && docker compose up -d recon-orchestrator` |
+| `mcp/kali-sandbox/Dockerfile` | `docker compose build kali-sandbox && docker compose up -d kali-sandbox` |
+| `webapp/Dockerfile` or `webapp/package.json` | `docker compose build webapp && docker compose up -d webapp` |
+| `recon/Dockerfile` | `docker compose --profile tools build recon` |
+| `gvm_scan/Dockerfile` | `docker compose --profile tools build vuln-scanner` |
+| `github_secret_hunt/Dockerfile` | `docker compose --profile tools build github-secret-hunter` |
+| `trufflehog_scan/Dockerfile` | `docker compose --profile tools build trufflehog-scanner` |
+| `docker-compose.yml` | `docker compose up -d` (re-creates affected containers) |
+| `prisma/schema.prisma` | `docker compose exec webapp npx prisma db push` |
 
+**Rebuild a single service:**
 ```bash
-# Restart a single service (picks up code changes instantly)
-docker compose restart agent              # AI agent orchestrator
-docker compose restart recon-orchestrator  # Recon orchestrator
-docker compose restart kali-sandbox       # MCP tool servers
+docker compose build <service>                    # Rebuild one image
+docker compose up -d --no-deps <service>          # Restart only that service
 ```
 
-No rebuild needed — just restart.
+**Common dev commands:**
+```bash
+docker compose ps                                 # Check service status
+docker compose logs -f <service>                  # Follow logs for a service
+docker compose down                               # Stop all (preserves volumes)
+docker compose --profile tools down --rmi local   # Remove built images
+docker compose --profile tools down --rmi local --volumes --remove-orphans  # Full cleanup
+```
 
-> For a complete development reference — hot-reload rules, common commands, important rules, and AI-assisted coding guidelines — see the **[Developer Guide](readmes/README.DEV.md)**.
->
-> If you need to update RedAmon to a new version, see [Updating to a New Version](#updating-to-a-new-version).
+> For a complete development reference -- hot-reload rules, common commands, important rules, and AI-assisted coding guidelines -- see the **[Developer Guide](readmes/README.DEV.md)**.
 
 ---
 

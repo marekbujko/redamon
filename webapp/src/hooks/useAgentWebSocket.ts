@@ -26,6 +26,7 @@ interface UseAgentWebSocketConfig {
   userId: string
   projectId: string
   sessionId: string
+  graphViewCypher?: string
   enabled?: boolean
   onMessage?: (message: ServerMessage) => void
   onError?: (error: Error) => void
@@ -59,6 +60,7 @@ export function useAgentWebSocket({
   userId,
   projectId,
   sessionId,
+  graphViewCypher,
   enabled = true,
   onMessage,
   onError,
@@ -114,10 +116,11 @@ export function useAgentWebSocket({
       user_id: userId,
       project_id: projectId,
       session_id: sessionId,
+      ...(graphViewCypher && { graph_view_cypher: graphViewCypher }),
     }
 
     sendMessage(MessageType.INIT, initPayload)
-  }, [userId, projectId, sessionId, sendMessage])
+  }, [userId, projectId, sessionId, graphViewCypher, sendMessage])
 
   // Public API: Send query
   const sendQuery = useCallback((question: string) => {
@@ -369,7 +372,7 @@ export function useAgentWebSocket({
         wsRef.current.close()
       }
     }
-  }, [enabled, userId, projectId, sessionId]) // Reconnect if session changes
+  }, [enabled, userId, projectId, sessionId, graphViewCypher]) // Reconnect if session or graph view changes
 
   return {
     status,
