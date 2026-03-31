@@ -406,6 +406,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Uncover (ProjectDiscovery multi-engine search)
     'UNCOVER_ENABLED': False,
     'UNCOVER_MAX_RESULTS': 500,
+    'UNCOVER_DOCKER_IMAGE': 'projectdiscovery/uncover:latest',
     'UNCOVER_QUAKE_API_KEY': '',
     'UNCOVER_HUNTER_API_KEY': '',
     'UNCOVER_PUBLICWWW_API_KEY': '',
@@ -824,6 +825,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['CRIMINALIP_ENABLED'] = project.get('criminalIpEnabled', DEFAULT_SETTINGS['CRIMINALIP_ENABLED'])
     settings['UNCOVER_ENABLED'] = project.get('uncoverEnabled', DEFAULT_SETTINGS['UNCOVER_ENABLED'])
     settings['UNCOVER_MAX_RESULTS'] = int(project.get('uncoverMaxResults', DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS']) or DEFAULT_SETTINGS['UNCOVER_MAX_RESULTS'])
+    settings['UNCOVER_DOCKER_IMAGE'] = project.get('uncoverDockerImage', DEFAULT_SETTINGS['UNCOVER_DOCKER_IMAGE'])
 
     # Subdomain Discovery Tool Toggles
     settings['CRTSH_ENABLED'] = project.get('crtshEnabled', DEFAULT_SETTINGS['CRTSH_ENABLED'])

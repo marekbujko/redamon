@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.1.4-release-2E8B57?style=flat" alt="Version 3.1.4"/>
+  <img height="24" src="https://img.shields.io/badge/v3.2.0-release-2E8B57?style=flat" alt="Version 3.2.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -134,7 +134,7 @@ The script builds all images and starts the services. When done, open **http://l
 Open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed.
 
 - **LLM Providers** -- add API keys for OpenAI, Anthropic, OpenRouter, AWS Bedrock, or any OpenAI-compatible endpoint (Ollama, vLLM, Groq, etc.). Each provider can be tested before saving. The model selector in project settings **dynamically fetches** available models from configured providers.
-- **API Keys** -- Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). Supports **key rotation** -- configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
+- **API Keys** -- Tavily, Shodan, SerpAPI, NVD, Vulners, URLScan, and threat intelligence keys (Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP) to enable extended agent capabilities (web search, OSINT, CVE lookups, passive threat intel). **Uncover multi-engine search** keys (Quake, Hunter, PublicWWW, HunterHow, Google, Onyphe, Driftnet) expand target discovery across 13 search engines -- shared keys (Shodan, Censys, FOFA, etc.) are automatically reused. Supports **key rotation** -- configure multiple keys per tool with automatic round-robin rotation to avoid rate limits.
 - **Tunneling** -- configure ngrok or chisel for reverse shell tunneling. Changes apply immediately without container restarts.
 
 All settings are stored per-user in the database. See the **[AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)** wiki page for detailed setup instructions.
@@ -304,6 +304,7 @@ A fully automated, **parallelized** scanning engine running inside a Kali Linux 
 | | **WHOIS + URLScan** | python-whois, URLScan.io API | Passive | Parallel |
 | | **DNS Resolution** | dnspython | Passive | 20 parallel workers |
 | | **OSINT Enrichment** | Shodan / InternetDB | Passive | Parallel with port scan |
+| | **Uncover Expansion** | ProjectDiscovery Uncover (13 engines: Shodan, Censys, FOFA, ZoomEye, Netlas, CriminalIP, Quake, Hunter, PublicWWW, HunterHow, Google, Onyphe, Driftnet) | Passive | Before port scan (GROUP 2b) |
 | | **Threat Intel Enrichment** | Censys, FOFA, OTX (AlienVault), Netlas, VirusTotal, ZoomEye, CriminalIP | Passive | 7 tools parallel (GROUP 3b) |
 | **Port Scanning** | **Port Scanning** | Masscan, Naabu | Active | Both parallel |
 | **Nmap Service Detection** | **Service Version Detection** | Nmap (-sV, --script vuln) | Active | Sequential per target |

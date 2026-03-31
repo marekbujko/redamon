@@ -16,20 +16,42 @@ process the newly discovered assets.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
-import logging
 import os
+import shutil
 import subprocess
+import tempfile
 from typing import Any, Dict, Set
+from urllib.parse import urlparse
 
 try:
     from recon.ip_filter import filter_ips_for_enrichment, is_non_routable_ip
 except ImportError:
     from ip_filter import filter_ips_for_enrichment, is_non_routable_ip
 
-logger = logging.getLogger(__name__)
 
-UNCOVER_DOCKER_IMAGE = "projectdiscovery/uncover:latest"
+def _is_valid_ip(value: str) -> bool:
+    """Return True if value is a valid IPv4/IPv6 address."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _extract_hostname_from_url(url: str) -> str:
+    """Extract hostname from a URL string, returning '' on failure."""
+    if not url:
+        return ''
+    try:
+        if '://' not in url:
+            url = 'https://' + url
+        return urlparse(url).hostname or ''
+    except Exception:
+        return ''
+
+UNCOVER_DOCKER_IMAGE_DEFAULT = "projectdiscovery/uncover:latest"
 UNCOVER_TIMEOUT = 600  # 10 minutes max
 
 
@@ -146,6 +168,7 @@ def _run_uncover_docker(
     config_path: str,
     max_results: int,
     temp_dir: str,
+    docker_image: str = UNCOVER_DOCKER_IMAGE_DEFAULT,
 ) -> list[dict]:
     """Run uncover via Docker and parse JSON output.
 
@@ -157,7 +180,7 @@ def _run_uncover_docker(
         "docker", "run", "--rm",
         "-v", f"{temp_dir}:/config:ro",
         "-v", f"{temp_dir}:/output",
-        UNCOVER_DOCKER_IMAGE,
+        docker_image,
         "-pc", "/config/provider-config.yaml",
         "-e", ",".join(engines),
         "-json",
@@ -170,7 +193,7 @@ def _run_uncover_docker(
     for q in queries:
         cmd.extend(["-q", q])
 
-    logger.info(f"Running uncover: engines={engines}, queries={queries}")
+    print(f"[*][Uncover] Running: engines={engines}, queries={queries}")
 
     result = None
     try:
@@ -187,7 +210,7 @@ def _run_uncover_docker(
                 for line in stderr.split('\n')[:5]:
                     line = line.strip()
                     if line and not line.startswith('[WRN]'):
-                        logger.warning(f"Uncover stderr: {line}")
+                        print(f"[!][Uncover] stderr: {line}")
 
     except subprocess.TimeoutExpired:
         print("[!][Uncover] Timed out — partial results may be available")
@@ -224,18 +247,27 @@ def _run_uncover_docker(
 
 
 def _deduplicate_results(results: list[dict]) -> list[dict]:
-    """Deduplicate by (ip, port) keeping the first occurrence per source."""
+    """Deduplicate results keeping the first occurrence per unique key.
+
+    Uses (ip, port) as key when IP is present, falls back to
+    (host, port) for engines like PublicWWW that return no IP.
+    Entries with neither ip nor host are skipped.
+    """
     seen: Set[tuple] = set()
     unique = []
     for r in results:
         ip = r.get('ip', '')
-        if not ip:
-            continue
+        host = r.get('host', '')
         try:
             port = int(r.get('port', 0) or 0)
         except (ValueError, TypeError):
             port = 0
-        key = (ip, port)
+        if ip:
+            key = (ip, port)
+        elif host:
+            key = (host, port)
+        else:
+            continue
         if key not in seen:
             seen.add(key)
             unique.append(r)
@@ -246,29 +278,52 @@ def _extract_hosts_and_ips(
     results: list[dict],
     domain: str,
     combined_result: dict,
-) -> tuple[list[str], list[str], dict]:
-    """Extract unique IPs, hostnames, and per-IP port data from uncover results.
+) -> tuple[list[str], list[str], dict, list[str]]:
+    """Extract unique IPs, hostnames, per-IP port data, and URLs from uncover results.
+
+    Handles engine quirks:
+    - Google puts URLs in the 'ip' field (not a real IP) -- extracts hostname.
+    - PublicWWW returns host/url but no IP -- captures hostname.
+    - Censys/PublicWWW/Google populate the 'url' field -- collected as URLs.
 
     Filters out non-routable and CDN IPs.
-    Returns (new_ips, new_hostnames, ip_ports_map).
+    Returns (new_ips, new_hostnames, ip_ports_map, urls).
     """
     all_ips: Set[str] = set()
     all_hosts: Set[str] = set()
+    all_urls: Set[str] = set()
     ip_ports: Dict[str, Set[int]] = {}
 
     for r in results:
         ip = r.get('ip', '')
         host = r.get('host', '')
+        url = r.get('url', '')
 
         try:
             port = int(r.get('port', 0) or 0)
         except (ValueError, TypeError):
             port = 0
 
+        # Google puts URL in ip field -- detect and extract hostname
+        if ip and not _is_valid_ip(ip):
+            extracted = _extract_hostname_from_url(ip)
+            if extracted:
+                host = host or extracted
+            if ip.startswith(('http://', 'https://')):
+                all_urls.add(ip)
+            ip = ''
+
         if ip:
             all_ips.add(ip)
             if port > 0:
                 ip_ports.setdefault(ip, set()).add(port)
+
+        # Collect url field (Censys, PublicWWW, Google)
+        if url and url.startswith(('http://', 'https://')):
+            all_urls.add(url)
+            # Extract host from url if we don't have one yet
+            if not host:
+                host = _extract_hostname_from_url(url)
 
         if host and host != ip:
             h = host.lower().strip().rstrip('.')
@@ -286,7 +341,14 @@ def _extract_hosts_and_ips(
         if ip in ip_ports:
             filtered_ip_ports[ip] = sorted(ip_ports[ip])
 
-    return filtered_ips, sorted(all_hosts), filtered_ip_ports
+    # Filter URLs to in-scope only
+    in_scope_urls = []
+    for u in sorted(all_urls):
+        h = _extract_hostname_from_url(u)
+        if h and (h == domain or h.endswith('.' + domain)):
+            in_scope_urls.append(u)
+
+    return filtered_ips, sorted(all_hosts), filtered_ip_ports, in_scope_urls
 
 
 def run_uncover_expansion(
@@ -337,8 +399,8 @@ def run_uncover_expansion(
     print(f"[*][Uncover] Queries: {queries}")
     print(f"[*][Uncover] Max results: {max_results}")
 
-    temp_dir = "/tmp/redamon/.uncover_temp"
-    os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs("/tmp/redamon", exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix="redamon_uncover_", dir="/tmp/redamon")
 
     try:
         # Write provider config (no yaml dependency -- write manually)
@@ -349,8 +411,10 @@ def run_uncover_expansion(
                 for k in keys:
                     f.write(f"  - {k}\n")
 
+        docker_image = settings.get('UNCOVER_DOCKER_IMAGE', UNCOVER_DOCKER_IMAGE_DEFAULT)
         raw_results = _run_uncover_docker(
             queries, engines, config_path, max_results, temp_dir,
+            docker_image=docker_image,
         )
 
         if not raw_results:
@@ -366,11 +430,13 @@ def run_uncover_expansion(
             src = r.get('source', 'unknown')
             source_counts[src] = source_counts.get(src, 0) + 1
 
-        new_ips, new_hosts, ip_ports = _extract_hosts_and_ips(
+        new_ips, new_hosts, ip_ports, urls = _extract_hosts_and_ips(
             deduped, domain, combined_result,
         )
 
         print(f"[+][Uncover] Discovered: {len(new_ips)} unique IPs, {len(new_hosts)} subdomains")
+        if urls:
+            print(f"[+][Uncover] Discovered: {len(urls)} in-scope URLs")
         for src, cnt in sorted(source_counts.items()):
             print(f"    [{src}] {cnt} results")
 
@@ -378,6 +444,7 @@ def run_uncover_expansion(
             "hosts": new_hosts,
             "ips": new_ips,
             "ip_ports": ip_ports,
+            "urls": urls,
             "sources": list(source_counts.keys()),
             "source_counts": source_counts,
             "total_raw": len(raw_results),
@@ -387,18 +454,14 @@ def run_uncover_expansion(
         return uncover_data
 
     except Exception as e:
-        logger.error(f"Uncover expansion failed: {e}")
-        print(f"[!][Uncover] Error: {e}")
+        print(f"[!][Uncover] Expansion failed: {e}")
         return {}
     finally:
-        # Cleanup temp files
-        for fname in ("provider-config.yaml", "uncover_output.jsonl"):
-            fpath = os.path.join(temp_dir, fname)
-            if os.path.isfile(fpath):
-                try:
-                    os.remove(fpath)
-                except OSError:
-                    pass
+        # Cleanup entire temp directory (unique per run)
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def merge_uncover_into_pipeline(
@@ -460,3 +523,21 @@ def merge_uncover_into_pipeline(
         print(f"[+][Uncover] Merged: {merged} new subdomains, {new_ip_count} new IPs into pipeline")
 
     return total
+
+
+def run_uncover_expansion_isolated(combined_result: dict, settings: dict[str, Any]) -> dict:
+    """Run uncover expansion and return only the uncover data dict.
+
+    Thread-safe: does not mutate combined_result. Reads DNS/IP data from
+    it but writes nothing back.
+
+    Args:
+        combined_result: The pipeline's combined result dictionary (read-only)
+        settings: Project settings dict
+
+    Returns:
+        The uncover data dictionary (just the expansion payload)
+    """
+    import copy
+    snapshot = copy.copy(combined_result)
+    return run_uncover_expansion(snapshot, settings)

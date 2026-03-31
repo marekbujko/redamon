@@ -2117,6 +2117,7 @@ class OsintMixin:
         """
         stats = {
             "subdomains_created": 0, "ips_created": 0,
+            "urls_created": 0,
             "relationships_created": 0, "errors": [],
         }
         domain = recon_data.get("domain", "") or ""
@@ -2125,8 +2126,13 @@ class OsintMixin:
             hosts = uncover.get("hosts") or []
             ips = uncover.get("ips") or []
             ip_ports = uncover.get("ip_ports") or {}
+            urls = uncover.get("urls") or []
+            sources = uncover.get("sources") or []
+            source_counts = uncover.get("source_counts") or {}
+            total_raw = uncover.get("total_raw", 0)
+            total_deduped = uncover.get("total_deduped", 0)
 
-            if not hosts and not ips:
+            if not hosts and not ips and not urls:
                 return stats
 
             with self.driver.session() as session:
@@ -2139,8 +2145,12 @@ class OsintMixin:
                             MERGE (s:Subdomain {name: $name, user_id: $user_id, project_id: $project_id})
                             ON CREATE SET s.discovered_at = datetime(), s.updated_at = datetime(),
                                           s.source = 'uncover', s.status = 'unverified'
+                            SET s.uncover_sources = $sources,
+                                s.uncover_total_raw = $total_raw,
+                                s.uncover_total_deduped = $total_deduped
                             """,
                             name=hostname, user_id=user_id, project_id=project_id,
+                            sources=sources, total_raw=total_raw, total_deduped=total_deduped,
                         )
                         stats["subdomains_created"] += 1
                         if domain:
@@ -2166,9 +2176,16 @@ class OsintMixin:
                             """
                             MERGE (i:IP {address: $address, user_id: $user_id, project_id: $project_id})
                             ON CREATE SET i.updated_at = datetime(), i.uncover_discovered = true
-                            SET i.uncover_enriched = true, i.updated_at = datetime()
+                            SET i.uncover_enriched = true, i.updated_at = datetime(),
+                                i.uncover_sources = $sources,
+                                i.uncover_source_counts = $source_counts_str,
+                                i.uncover_total_raw = $total_raw,
+                                i.uncover_total_deduped = $total_deduped
                             """,
                             address=ip, user_id=user_id, project_id=project_id,
+                            sources=sources,
+                            source_counts_str=str(source_counts),
+                            total_raw=total_raw, total_deduped=total_deduped,
                         )
                         stats["ips_created"] += 1
 
@@ -2192,12 +2209,29 @@ class OsintMixin:
                     except Exception as e:
                         stats["errors"].append(f"Uncover IP {ip}: {e}")
 
+                for url in urls:
+                    if not url:
+                        continue
+                    try:
+                        session.run(
+                            """
+                            MERGE (e:Endpoint {url: $url, user_id: $user_id, project_id: $project_id})
+                            ON CREATE SET e.discovered_at = datetime(), e.updated_at = datetime(),
+                                          e.source = 'uncover', e.method = 'GET'
+                            """,
+                            url=url, user_id=user_id, project_id=project_id,
+                        )
+                        stats["urls_created"] += 1
+                    except Exception as e:
+                        stats["errors"].append(f"Uncover URL {url}: {e}")
+
         except Exception as e:
             stats["errors"].append(f"update_graph_from_uncover: {e}")
 
         print(f"[+][graph-db] Uncover Graph Update: "
               f"{stats['subdomains_created']} subdomains, "
               f"{stats['ips_created']} IPs, "
+              f"{stats['urls_created']} URLs, "
               f"{stats['relationships_created']} relationships")
         print(f"[graph-db] update_graph_from_uncover complete")
         return stats

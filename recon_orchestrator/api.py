@@ -184,6 +184,14 @@ async def get_defaults():
             'CRIMINALIP_API_KEY',
             'FOFA_EMAIL',
             'FOFA_API_KEY',
+            'UNCOVER_QUAKE_API_KEY',
+            'UNCOVER_HUNTER_API_KEY',
+            'UNCOVER_PUBLICWWW_API_KEY',
+            'UNCOVER_HUNTERHOW_API_KEY',
+            'UNCOVER_GOOGLE_API_KEY',
+            'UNCOVER_GOOGLE_API_CX',
+            'UNCOVER_ONYPHE_API_KEY',
+            'UNCOVER_DRIFTNET_API_KEY',
         }
 
         # Convert snake_case keys to camelCase for frontend

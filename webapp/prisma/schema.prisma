@@ -502,6 +502,7 @@ model Project {
   criminalIpEnabled                     Boolean  @default(false)  @map("criminalip_enabled")
   uncoverEnabled                        Boolean  @default(false)  @map("uncover_enabled")
   uncoverMaxResults                     Int      @default(500)    @map("uncover_max_results")
+  uncoverDockerImage                    String   @default("projectdiscovery/uncover:latest") @map("uncover_docker_image")
 
   // Subdomain Discovery Tool Toggles
   crtshEnabled                          Boolean  @default(true)  @map("crtsh_enabled")

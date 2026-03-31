@@ -14,6 +14,7 @@ from uncover_enrich import (
     _build_queries,
     merge_uncover_into_pipeline,
     run_uncover_expansion,
+    run_uncover_expansion_isolated,
 )
 
 
@@ -107,7 +108,7 @@ class TestExtractHostsAndIps(unittest.TestCase):
             {'ip': '93.184.216.34', 'port': 443, 'host': 'www.example.com'},
             {'ip': '100.64.1.5', 'port': 8080, 'host': 'cgnat.example.com'},
         ]
-        ips, hosts, ip_ports = _extract_hosts_and_ips(
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(
             results, 'example.com', {}
         )
         self.assertIn('93.184.216.34', ips)
@@ -119,7 +120,7 @@ class TestExtractHostsAndIps(unittest.TestCase):
             {'ip': '93.184.216.34', 'port': 443, 'host': 'sub.example.com'},
             {'ip': '1.2.3.4', 'port': 80, 'host': 'other.net'},
         ]
-        ips, hosts, ip_ports = _extract_hosts_and_ips(
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(
             results, 'example.com', {}
         )
         self.assertIn('sub.example.com', hosts)
@@ -130,7 +131,7 @@ class TestExtractHostsAndIps(unittest.TestCase):
             {'ip': '93.184.216.34', 'port': 80},
             {'ip': '93.184.216.34', 'port': 443},
         ]
-        ips, hosts, ip_ports = _extract_hosts_and_ips(
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(
             results, 'example.com', {}
         )
         self.assertEqual(sorted(ip_ports.get('93.184.216.34', [])), [80, 443])
@@ -242,6 +243,293 @@ class TestRunUncoverExpansion(unittest.TestCase):
         }
         result = run_uncover_expansion(combined, settings)
         self.assertIsInstance(result, dict)
+
+
+class TestMergeIpMetadata(unittest.TestCase):
+
+    def test_merge_expands_metadata_ips(self):
+        combined = {
+            "dns": {"subdomains": {}},
+            "domain": "example.com",
+            "metadata": {"expanded_ips": ["9.9.9.9"]},
+        }
+        uncover_data = {
+            "hosts": [],
+            "ips": ["1.2.3.4", "9.9.9.9"],
+            "ip_ports": {"1.2.3.4": [80]},
+        }
+        merge_uncover_into_pipeline(combined, uncover_data, "example.com")
+        expanded = combined["metadata"]["expanded_ips"]
+        self.assertIn("1.2.3.4", expanded)
+        self.assertIn("9.9.9.9", expanded)
+        # no duplicates
+        self.assertEqual(expanded.count("9.9.9.9"), 1)
+
+    def test_merge_creates_metadata_if_missing(self):
+        combined = {"dns": {"subdomains": {}}, "domain": "example.com"}
+        uncover_data = {"hosts": [], "ips": ["1.2.3.4"], "ip_ports": {}}
+        merge_uncover_into_pipeline(combined, uncover_data, "example.com")
+        self.assertIn("1.2.3.4", combined["metadata"]["expanded_ips"])
+
+
+class TestRunUncoverExpansionIsolated(unittest.TestCase):
+
+    def test_does_not_mutate_original(self):
+        combined = {
+            "domain": "example.com",
+            "dns": {"subdomains": {"existing.example.com": {}}},
+            "metadata": {"modules_executed": []},
+        }
+        original_keys = set(combined.keys())
+        result = run_uncover_expansion_isolated(
+            combined, {'UNCOVER_ENABLED': False}
+        )
+        self.assertEqual(result, {})
+        self.assertEqual(set(combined.keys()), original_keys)
+
+    @patch('uncover_enrich.subprocess.run')
+    @patch('uncover_enrich.os.path.isfile', return_value=True)
+    @patch('uncover_enrich.tempfile.mkdtemp', return_value='/tmp/redamon/test_iso')
+    @patch('uncover_enrich.os.makedirs')
+    @patch('uncover_enrich.shutil.rmtree')
+    def test_returns_uncover_data(self, mock_rmtree, mock_makedirs,
+                                  mock_mkdtemp, mock_isfile, mock_run):
+        output_lines = [
+            json.dumps({"ip": "93.184.216.34", "port": 443,
+                         "host": "www.example.com", "source": "shodan"}),
+        ]
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        # Mock file reading
+        m = unittest.mock.mock_open(read_data="\n".join(output_lines) + "\n")
+        with patch('builtins.open', m):
+            settings = {
+                'UNCOVER_ENABLED': True,
+                'SHODAN_API_KEY': 'test_key',
+                'UNCOVER_MAX_RESULTS': 100,
+            }
+            combined = {
+                "domain": "example.com",
+                "metadata": {"modules_executed": []},
+            }
+            result = run_uncover_expansion_isolated(combined, settings)
+
+        self.assertIsInstance(result, dict)
+        # Original combined should NOT have "uncover" key
+        self.assertNotIn("uncover", combined)
+
+
+class TestRunUncoverExpansionReturnFields(unittest.TestCase):
+
+    @patch('uncover_enrich.subprocess.run')
+    @patch('uncover_enrich.os.path.isfile', return_value=True)
+    @patch('uncover_enrich.tempfile.mkdtemp', return_value='/tmp/redamon/test_fields')
+    @patch('uncover_enrich.os.makedirs')
+    @patch('uncover_enrich.shutil.rmtree')
+    def test_result_contains_all_expected_keys(self, mock_rmtree, mock_makedirs,
+                                                mock_mkdtemp, mock_isfile, mock_run):
+        output_lines = [
+            json.dumps({"ip": "93.184.216.34", "port": 443,
+                         "host": "www.example.com", "source": "shodan"}),
+            json.dumps({"ip": "93.184.216.35", "port": 80,
+                         "host": "api.example.com", "source": "censys"}),
+        ]
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        m = unittest.mock.mock_open(read_data="\n".join(output_lines) + "\n")
+        with patch('builtins.open', m):
+            settings = {
+                'UNCOVER_ENABLED': True,
+                'SHODAN_API_KEY': 'key1',
+                'CENSYS_API_TOKEN': 'tok',
+                'CENSYS_ORG_ID': 'org',
+                'UNCOVER_MAX_RESULTS': 100,
+            }
+            combined = {
+                "domain": "example.com",
+                "metadata": {"modules_executed": []},
+            }
+            result = run_uncover_expansion(combined, settings)
+
+        expected_keys = {"hosts", "ips", "ip_ports", "urls", "sources",
+                         "source_counts", "total_raw", "total_deduped"}
+        self.assertTrue(expected_keys.issubset(set(result.keys())),
+                        f"Missing keys: {expected_keys - set(result.keys())}")
+        self.assertIsInstance(result["sources"], list)
+        self.assertIsInstance(result["source_counts"], dict)
+        self.assertIsInstance(result["total_raw"], int)
+        self.assertIsInstance(result["total_deduped"], int)
+
+    @patch('uncover_enrich.subprocess.run')
+    def test_no_domain_returns_empty(self, mock_run):
+        settings = {
+            'UNCOVER_ENABLED': True,
+            'SHODAN_API_KEY': 'test_key',
+        }
+        combined = {"domain": "", "metadata": {"modules_executed": []}}
+        result = run_uncover_expansion(combined, settings)
+        self.assertEqual(result, {})
+        mock_run.assert_not_called()
+
+
+class TestDeduplicateEdgeCases(unittest.TestCase):
+
+    def test_non_numeric_port(self):
+        results = [
+            {'ip': '1.2.3.4', 'port': 'abc'},
+            {'ip': '1.2.3.4', 'port': None},
+        ]
+        deduped = _deduplicate_results(results)
+        # Both have port=0 after coercion, so dedup to 1
+        self.assertEqual(len(deduped), 1)
+
+    def test_empty_list(self):
+        self.assertEqual(_deduplicate_results([]), [])
+
+    def test_preserves_order(self):
+        results = [
+            {'ip': '1.1.1.1', 'port': 80, 'source': 'a'},
+            {'ip': '2.2.2.2', 'port': 443, 'source': 'b'},
+            {'ip': '3.3.3.3', 'port': 22, 'source': 'c'},
+        ]
+        deduped = _deduplicate_results(results)
+        self.assertEqual([r['source'] for r in deduped], ['a', 'b', 'c'])
+
+
+class TestExtractHostsEdgeCases(unittest.TestCase):
+
+    def test_strips_trailing_dot(self):
+        results = [
+            {'ip': '93.184.216.34', 'port': 80, 'host': 'sub.example.com.'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('sub.example.com', hosts)
+
+    def test_case_insensitive_host(self):
+        results = [
+            {'ip': '93.184.216.34', 'port': 80, 'host': 'Sub.Example.COM'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('sub.example.com', hosts)
+
+    def test_host_same_as_ip_excluded(self):
+        results = [
+            {'ip': '93.184.216.34', 'port': 80, 'host': '93.184.216.34'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertEqual(hosts, [])
+
+
+class TestGoogleEngineHandling(unittest.TestCase):
+    """Google puts URLs in the ip field -- verify we extract host and capture URL."""
+
+    def test_google_url_in_ip_extracts_host(self):
+        results = [
+            {'ip': 'https://sub.example.com/page', 'port': 0,
+             'host': 'sub.example.com', 'source': 'google'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('sub.example.com', hosts)
+        # URL-as-IP should NOT end up in the IP list
+        self.assertEqual(ips, [])
+
+    def test_google_url_in_ip_captured_as_url(self):
+        results = [
+            {'ip': 'https://sub.example.com/path', 'port': 0,
+             'host': '', 'source': 'google'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('https://sub.example.com/path', urls)
+        self.assertIn('sub.example.com', hosts)
+        self.assertEqual(ips, [])
+
+    def test_google_out_of_scope_url_filtered(self):
+        results = [
+            {'ip': 'https://other.net/page', 'port': 0,
+             'host': 'other.net', 'source': 'google'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertEqual(hosts, [])
+        self.assertEqual(urls, [])  # out of scope
+
+
+class TestPublicWWWHandling(unittest.TestCase):
+    """PublicWWW returns no IP -- verify host-only results are kept."""
+
+    def test_publicwww_dedup_by_host(self):
+        results = [
+            {'ip': '', 'port': 0, 'host': 'sub.example.com',
+             'url': 'https://sub.example.com/a', 'source': 'publicwww'},
+            {'ip': '', 'port': 0, 'host': 'sub.example.com',
+             'url': 'https://sub.example.com/b', 'source': 'publicwww'},
+        ]
+        deduped = _deduplicate_results(results)
+        # Same (host, port=0) -> dedup to 1
+        self.assertEqual(len(deduped), 1)
+
+    def test_publicwww_host_extracted(self):
+        results = [
+            {'ip': '', 'port': 0, 'host': 'sub.example.com',
+             'url': 'https://sub.example.com/page', 'source': 'publicwww'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('sub.example.com', hosts)
+        self.assertIn('https://sub.example.com/page', urls)
+
+    def test_publicwww_host_from_url_fallback(self):
+        results = [
+            {'ip': '', 'port': 0, 'host': '',
+             'url': 'https://api.example.com/v1', 'source': 'publicwww'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('api.example.com', hosts)
+        self.assertIn('https://api.example.com/v1', urls)
+
+
+class TestUrlCollection(unittest.TestCase):
+    """Verify url field is collected from engines that populate it."""
+
+    def test_censys_url_captured(self):
+        results = [
+            {'ip': '1.2.3.4', 'port': 443, 'host': 'www.example.com',
+             'url': 'https://www.example.com/', 'source': 'censys'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertIn('https://www.example.com/', urls)
+        self.assertIn('1.2.3.4', ips)
+        self.assertIn('www.example.com', hosts)
+
+    def test_out_of_scope_url_filtered(self):
+        results = [
+            {'ip': '1.2.3.4', 'port': 80, 'host': 'other.net',
+             'url': 'https://other.net/page', 'source': 'censys'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertEqual(urls, [])
+
+    def test_non_http_url_ignored(self):
+        results = [
+            {'ip': '1.2.3.4', 'port': 21, 'host': 'ftp.example.com',
+             'url': 'ftp://ftp.example.com', 'source': 'censys'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertEqual(urls, [])
+
+    def test_empty_url_ignored(self):
+        results = [
+            {'ip': '1.2.3.4', 'port': 80, 'host': 'www.example.com',
+             'url': '', 'source': 'shodan'},
+        ]
+        ips, hosts, ip_ports, urls = _extract_hosts_and_ips(results, 'example.com', {})
+        self.assertEqual(urls, [])
 
 
 if __name__ == '__main__':
