@@ -35,6 +35,7 @@ from tools import (
     VirusTotalToolManager,
     ZoomEyeToolManager,
     CriminalIpToolManager,
+    ClaudeCodeToolManager,
     PhaseAwareToolExecutor,
 )
 from orchestrator_helpers import (
@@ -219,7 +220,7 @@ class AgentOrchestrator:
         # OSINT tools — Censys, FOFA, OTX, Netlas, VirusTotal, ZoomEye, CriminalIP
         if hasattr(self, '_osint_managers') and self.tool_executor:
             _osint_key_map = {
-                'censys': {'id_field': 'censysApiId', 'secret_field': 'censysApiSecret'},
+                'censys': {'id_field': 'censysApiId', 'secret_field': 'censysApiSecret', 'token_field': 'censysApiToken'},
                 'fofa': {'key_field': 'fofaApiKey', 'rotation_name': 'fofa'},
                 'otx': {'key_field': 'otxApiKey', 'rotation_name': 'otx'},
                 'netlas': {'key_field': 'netlasApiKey', 'rotation_name': 'netlas'},
@@ -238,9 +239,17 @@ class AgentOrchestrator:
                 if tool_name == 'censys':
                     api_id = user_settings.get(key_cfg['id_field'], '')
                     api_secret = user_settings.get(key_cfg['secret_field'], '')
-                    if api_id and api_secret and (mgr.api_id != api_id or mgr.api_secret != api_secret):
+                    api_token = user_settings.get('censysApiToken', '')
+                    creds_changed = (
+                        mgr.api_id != api_id
+                        or mgr.api_secret != api_secret
+                        or mgr.api_token != api_token
+                    )
+                    has_creds = bool(api_token) or bool(api_id and api_secret)
+                    if has_creds and creds_changed:
                         mgr.api_id = api_id
                         mgr.api_secret = api_secret
+                        mgr.api_token = api_token
                         self.tool_executor.update_osint_tool(tool_name, mgr.get_tool())
                         logger.info(f"Updated {tool_name} tool with API credentials")
                 else:
@@ -251,6 +260,21 @@ class AgentOrchestrator:
                         logger.info(f"Updated {tool_name} tool with API key")
                     if key_val and hasattr(mgr, 'key_rotator'):
                         mgr.key_rotator = _build_rotator(key_val, key_cfg.get('rotation_name', tool_name))
+
+        # Claude Code — routes through the host proxy (claude_proxy/server.py).
+        # No API key or in-container login needed; the proxy uses the host's
+        # existing Claude Code session.
+        if hasattr(self, '_claude_code_manager') and self.tool_executor:
+            claude_code_enabled = get_setting('CLAUDE_CODE_ENABLED', False)
+
+            if claude_code_enabled:
+                claude_code_tool = self._claude_code_manager.get_tool()
+                self.tool_executor.update_claude_code_tool(claude_code_tool)
+                if claude_code_tool:
+                    logger.info(f"Claude Code tool enabled (proxy: {self._claude_code_manager.proxy_url})")
+            else:
+                self.tool_executor.update_claude_code_tool(None)
+                logger.debug("Claude Code tool disabled via project settings")
 
     def _setup_llm(self) -> None:
         """Initialize the LLM based on current model_name.
@@ -327,11 +351,16 @@ class AgentOrchestrator:
             for name, mgr in self._osint_managers.items()
         }
 
+        # Setup Claude Code tool (enabled/disabled per project settings later)
+        self._claude_code_manager = ClaudeCodeToolManager()
+        claude_code_tool = self._claude_code_manager.get_tool()
+
         # Create phase-aware tool executor
         self.tool_executor = PhaseAwareToolExecutor(
             mcp_manager, graph_tool, web_search_tool,
             shodan_tool, google_dork_tool,
             osint_tools=osint_tools,
+            claude_code_tool=claude_code_tool,
         )
         self.tool_executor.register_mcp_tools(mcp_tools)
 

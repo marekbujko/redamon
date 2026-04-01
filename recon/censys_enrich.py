@@ -70,18 +70,25 @@ def _censys_normalize_software(svc: dict) -> list:
     return out
 
 
-def _censys_get_host(ip: str, api_id: str, api_secret: str) -> tuple[dict | None, bool]:
-    """GET /v2/hosts/{ip} with Basic auth.
+def _censys_get_host(ip: str, api_id: str, api_secret: str, api_token: str = "") -> tuple[dict | None, bool]:
+    """GET /v2/hosts/{ip} using Bearer token (Personal API Token) or Basic auth (ID + Secret).
 
     Returns (result_or_none, rate_limited). If rate_limited, caller should stop.
     """
     url = f"{CENSYS_API_BASE}/hosts/{ip}"
     try:
-        resp = requests.get(
-            url,
-            auth=(api_id, api_secret),
-            timeout=30,
-        )
+        if api_token:
+            resp = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {api_token}"},
+                timeout=30,
+            )
+        else:
+            resp = requests.get(
+                url,
+                auth=(api_id, api_secret),
+                timeout=30,
+            )
         if resp.status_code == 200:
             body = resp.json()
             result = body.get("result")
@@ -265,9 +272,10 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
 
     api_id = settings.get("CENSYS_API_ID", "") or ""
     api_secret = settings.get("CENSYS_API_SECRET", "") or ""
-    if not api_id or not api_secret:
-        logger.warning("Censys API ID or secret missing — skipping enrichment")
-        print("[!][Censys] CENSYS_API_ID / CENSYS_API_SECRET not configured — skipping")
+    api_token = settings.get("CENSYS_API_TOKEN", "") or ""
+    if not api_token and (not api_id or not api_secret):
+        logger.warning("Censys credentials missing — skipping enrichment")
+        print("[!][Censys] No Censys credentials configured (need Personal API Token or API ID + Secret) — skipping")
         return combined_result
 
     print(f"[*][Censys] Starting OSINT enrichment")
@@ -283,7 +291,7 @@ def run_censys_enrichment(combined_result: dict, settings: dict[str, Any]) -> di
         else:
             print(f"[*][Censys] Querying host view for {len(ips)} IPs...")
             for ip in ips:
-                result, rate_limited = _censys_get_host(ip, api_id, api_secret)
+                result, rate_limited = _censys_get_host(ip, api_id, api_secret, api_token)
                 if rate_limited:
                     break
                 if result is None:

@@ -21,6 +21,7 @@ interface UserSettings {
   urlscanApiKey: string
   censysApiId: string
   censysApiSecret: string
+  censysApiToken: string
   fofaApiKey: string
   otxApiKey: string
   netlasApiKey: string
@@ -42,6 +43,7 @@ const EMPTY_SETTINGS: UserSettings = {
   urlscanApiKey: '',
   censysApiId: '',
   censysApiSecret: '',
+  censysApiToken: '',
   fofaApiKey: '',
   otxApiKey: '',
   netlasApiKey: '',
@@ -275,6 +277,7 @@ export default function SettingsPage() {
           urlscanApiKey: data.urlscanApiKey || '',
           censysApiId: data.censysApiId || '',
           censysApiSecret: data.censysApiSecret || '',
+          censysApiToken: data.censysApiToken || '',
           fofaApiKey: data.fofaApiKey || '',
           otxApiKey: data.otxApiKey || '',
           netlasApiKey: data.netlasApiKey || '',
@@ -354,6 +357,7 @@ export default function SettingsPage() {
           urlscanApiKey: data.urlscanApiKey || '',
           censysApiId: data.censysApiId || '',
           censysApiSecret: data.censysApiSecret || '',
+          censysApiToken: data.censysApiToken || '',
           fofaApiKey: data.fofaApiKey || '',
           otxApiKey: data.otxApiKey || '',
           netlasApiKey: data.netlasApiKey || '',
@@ -709,6 +713,16 @@ export default function SettingsPage() {
               visible={!!visibleFields.censysApiSecret}
               onToggle={() => toggleFieldVisibility('censysApiSecret')}
               onChange={v => updateSetting('censysApiSecret', v)}
+            />
+            <SecretField
+              label="Censys Personal API Token"
+              hint="Personal Access Token from your Censys account — alternative to API ID + Secret. Takes precedence when both are set."
+              signupUrl="https://accounts.censys.io/settings/personal-access-tokens"
+              badges={['AI Agent', 'Recon Pipeline']}
+              value={settings.censysApiToken}
+              visible={!!visibleFields.censysApiToken}
+              onToggle={() => toggleFieldVisibility('censysApiToken')}
+              onChange={v => updateSetting('censysApiToken', v)}
             />
             <SecretField
               label="FOFA API Key"

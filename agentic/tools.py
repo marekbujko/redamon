@@ -1012,12 +1012,15 @@ class CensysToolManager:
 
     API_BASE = "https://search.censys.io/api/v2"
 
-    def __init__(self, api_id: str = '', api_secret: str = ''):
+    def __init__(self, api_id: str = '', api_secret: str = '', api_token: str = ''):
         self.api_id = api_id
         self.api_secret = api_secret
+        self.api_token = api_token
 
     def get_tool(self) -> Optional[callable]:
-        if not self.api_id or not self.api_secret:
+        has_token = bool(self.api_token)
+        has_id_secret = bool(self.api_id and self.api_secret)
+        if not has_token and not has_id_secret:
             logger.warning("Censys API credentials not configured - censys tool unavailable.")
             return None
         manager = self
@@ -1039,9 +1042,13 @@ class CensysToolManager:
             Returns:
                 Formatted results from the Censys API
             """
-            auth = (manager.api_id, manager.api_secret)
+            # Personal API Token (Bearer) takes precedence over ID + Secret (Basic auth)
+            if manager.api_token:
+                client_kwargs = {"timeout": 30.0, "headers": {"Authorization": f"Bearer {manager.api_token}"}}
+            else:
+                client_kwargs = {"timeout": 30.0, "auth": (manager.api_id, manager.api_secret)}
             try:
-                async with httpx.AsyncClient(timeout=30.0, auth=auth) as client:
+                async with httpx.AsyncClient(**client_kwargs) as client:
                     if action == "search":
                         if not query:
                             return "Error: 'query' required for action='search'"
@@ -1758,6 +1765,108 @@ class CriminalIpToolManager:
 
 
 # =============================================================================
+# CLAUDE CODE TOOL MANAGER
+# =============================================================================
+
+class ClaudeCodeToolManager:
+    """
+    Manages Claude Code integration via a lightweight host proxy.
+
+    The agent container calls the RedAmon Claude Code Proxy
+    (claude_proxy/server.py) running on the host at host.docker.internal:8099.
+    The proxy invokes the host's `claude --print` binary which is already
+    authenticated via the user's existing Claude Code session (macOS Keychain
+    OAuth). No API key or in-container login is required.
+    """
+
+    def __init__(self, proxy_url: str = None):
+        default = os.environ.get(
+            'CLAUDE_PROXY_URL',
+            'http://host.docker.internal:8099'
+        )
+        self.proxy_url = (proxy_url or default).rstrip('/')
+
+    def _proxy_reachable(self) -> bool:
+        """Quick synchronous check that the proxy health endpoint responds."""
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{self.proxy_url}/health", timeout=3) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def get_tool(self) -> Optional[callable]:
+        """
+        Return the claude_code LangChain tool.
+
+        Returns None if the Claude Code proxy is not reachable, logging a
+        clear startup hint so operators can fix it easily.
+        """
+        if not self._proxy_reachable():
+            logger.warning(
+                f"Claude Code proxy not reachable at '{self.proxy_url}/health'. "
+                "Start it with: ./redamon.sh start-claude-proxy  "
+                "(or: python3 claude_proxy/server.py)"
+            )
+            return None
+
+        manager = self
+
+        @tool
+        async def claude_code(task: str, working_directory: str = '/tmp') -> str:
+            """
+            Execute a code analysis or security review task using Claude Code.
+
+            This tool delegates to the Claude Code CLI running on the host via
+            the RedAmon Claude Code Proxy. It uses the host's existing Claude
+            Code login session — no API key configuration in RedAmon is needed.
+
+            Use this tool to:
+            - Analyze source code files for security vulnerabilities (SQLi, XSS, SSRF, RCE, etc.)
+            - Hunt for hardcoded credentials, API keys, and tokens inside discovered repositories
+            - Review configuration files and IaC templates for misconfigurations
+            - Examine JavaScript/TypeScript bundles for exposed secrets or internal API endpoints
+            - Generate a security-focused summary of an application's attack surface from its code
+            - Investigate post-exploitation artifacts (scripts, configs) left on compromised hosts
+
+            Args:
+                task: Clear description of the analysis or review task to perform.
+                working_directory: Absolute path to the directory containing code to analyze.
+                                   Defaults to /tmp. Must already exist on the filesystem.
+
+            Returns:
+                Claude Code's full analysis output, findings, and recommendations.
+            """
+            import httpx
+
+            payload = {"task": task, "working_directory": working_directory}
+            logger.info(
+                f"Forwarding claude_code task to proxy at {manager.proxy_url} "
+                f"(dir: {working_directory}, task length: {len(task)} chars)"
+            )
+
+            try:
+                async with httpx.AsyncClient(timeout=320) as client:
+                    resp = await client.post(f"{manager.proxy_url}/claude", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return data.get("output", "Claude Code returned no output.")
+
+            except httpx.ConnectError:
+                return (
+                    f"Error: Claude Code proxy is not running at '{manager.proxy_url}'. "
+                    "Start it with: ./redamon.sh start-claude-proxy"
+                )
+            except httpx.TimeoutException:
+                return "Error: Claude Code proxy timed out after 320 seconds."
+            except Exception as e:
+                logger.error(f"Claude Code proxy call failed: {e}")
+                return f"Error calling Claude Code proxy: {e}"
+
+        return claude_code
+
+
+# =============================================================================
 # PHASE-AWARE TOOL EXECUTOR
 # =============================================================================
 
@@ -1775,6 +1884,7 @@ class PhaseAwareToolExecutor:
         shodan_tool: Optional[callable] = None,
         google_dork_tool: Optional[callable] = None,
         osint_tools: Optional[Dict[str, callable]] = None,
+        claude_code_tool: Optional[callable] = None,
     ):
         self.mcp_manager = mcp_manager
         self.graph_tool = graph_tool
@@ -1802,6 +1912,10 @@ class PhaseAwareToolExecutor:
             for name, t in osint_tools.items():
                 if t is not None:
                     self._all_tools[name] = t
+
+        # Register Claude Code tool
+        if claude_code_tool:
+            self._all_tools["claude_code"] = claude_code_tool
 
     def register_mcp_tools(self, tools: List) -> None:
         """Register MCP tools after they're loaded."""
@@ -1835,6 +1949,13 @@ class PhaseAwareToolExecutor:
             self._all_tools[name] = tool
         else:
             self._all_tools.pop(name, None)
+
+    def update_claude_code_tool(self, tool: Optional[callable]) -> None:
+        """Replace or remove the Claude Code tool (e.g. when enabled/disabled in project settings)."""
+        if tool:
+            self._all_tools["claude_code"] = tool
+        else:
+            self._all_tools.pop("claude_code", None)
 
     def _extract_text_from_output(self, output) -> str:
         """

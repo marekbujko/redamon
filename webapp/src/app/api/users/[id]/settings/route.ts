@@ -51,6 +51,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         urlscanApiKey: '',
         censysApiId: '',
         censysApiSecret: '',
+        censysApiToken: '',
         fofaApiKey: '',
         otxApiKey: '',
         netlasApiKey: '',
@@ -76,6 +77,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         urlscanApiKey: maskSecret(settings.urlscanApiKey),
         censysApiId: maskSecret(settings.censysApiId),
         censysApiSecret: maskSecret(settings.censysApiSecret),
+        censysApiToken: maskSecret(settings.censysApiToken),
         fofaApiKey: maskSecret(settings.fofaApiKey),
         otxApiKey: maskSecret(settings.otxApiKey),
         netlasApiKey: maskSecret(settings.netlasApiKey),
@@ -109,7 +111,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     })
 
     const data: Record<string, string> = {}
-    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiId', 'censysApiSecret', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
+    const fields = ['githubAccessToken', 'tavilyApiKey', 'shodanApiKey', 'serpApiKey', 'nvdApiKey', 'vulnersApiKey', 'urlscanApiKey', 'censysApiId', 'censysApiSecret', 'censysApiToken', 'fofaApiKey', 'otxApiKey', 'netlasApiKey', 'virusTotalApiKey', 'zoomEyeApiKey', 'criminalIpApiKey', 'ngrokAuthtoken', 'chiselServerUrl', 'chiselAuth'] as const
 
     for (const field of fields) {
       if (field in body) {
@@ -221,6 +223,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       urlscanApiKey: maskSecret(settings.urlscanApiKey),
       censysApiId: maskSecret(settings.censysApiId),
       censysApiSecret: maskSecret(settings.censysApiSecret),
+      censysApiToken: maskSecret(settings.censysApiToken),
       fofaApiKey: maskSecret(settings.fofaApiKey),
       otxApiKey: maskSecret(settings.otxApiKey),
       netlasApiKey: maskSecret(settings.netlasApiKey),

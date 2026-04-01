@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 DANGEROUS_TOOLS = frozenset({
     'execute_nmap', 'execute_naabu', 'execute_nuclei', 'execute_curl',
     'msf_restart', 'kali_shell', 'metasploit_console', 'execute_code',
-    'execute_hydra',
+    'execute_hydra', 'claude_code',
 })
 
 # =============================================================================
@@ -100,7 +100,12 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'virustotal': ['informational', 'exploitation'],
         'zoomeye': ['informational', 'exploitation'],
         'criminalip': ['informational', 'exploitation'],
+        'claude_code': ['informational', 'exploitation', 'post_exploitation'],
     },
+
+    # Claude Code CLI Integration
+    'CLAUDE_CODE_ENABLED': False,
+    'CLAUDE_CODE_PATH': 'claude',  # Path to claude binary (must be on PATH or absolute)
 
     # Kali Shell Library Installation
     'KALI_INSTALL_ENABLED': False,
@@ -155,6 +160,11 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'user': {},
     },
     'USER_ATTACK_SKILLS': [],  # Populated from DB when user skills are enabled
+
+    # Infosec-skills-compatible Skill Injection
+    # List of skill IDs to inject into the agent system prompt (e.g. ["vulnerabilities/ssrf", "tooling/nuclei"])
+    # Max 5 skills per session. Skills are stored in agentic/skills/ as markdown files.
+    'AGENT_SKILLS': [],
 
     # Legacy (deprecated — kept for backward compat)
     'BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS': 3,
@@ -254,6 +264,8 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['KALI_INSTALL_ENABLED'] = project.get('agentKaliInstallEnabled', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_ENABLED'])
     settings['KALI_INSTALL_ALLOWED_PACKAGES'] = project.get('agentKaliInstallAllowedPackages', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_ALLOWED_PACKAGES'])
     settings['KALI_INSTALL_FORBIDDEN_PACKAGES'] = project.get('agentKaliInstallForbiddenPackages', DEFAULT_AGENT_SETTINGS['KALI_INSTALL_FORBIDDEN_PACKAGES'])
+    settings['CLAUDE_CODE_ENABLED'] = project.get('agentClaudeCodeEnabled', DEFAULT_AGENT_SETTINGS['CLAUDE_CODE_ENABLED'])
+    settings['CLAUDE_CODE_PATH'] = project.get('agentClaudeCodePath', DEFAULT_AGENT_SETTINGS['CLAUDE_CODE_PATH'])
     settings['HYDRA_ENABLED'] = project.get('hydraEnabled', DEFAULT_AGENT_SETTINGS['HYDRA_ENABLED'])
     settings['HYDRA_THREADS'] = project.get('hydraThreads', DEFAULT_AGENT_SETTINGS['HYDRA_THREADS'])
     settings['HYDRA_WAIT_BETWEEN_CONNECTIONS'] = project.get('hydraWaitBetweenConnections', DEFAULT_AGENT_SETTINGS['HYDRA_WAIT_BETWEEN_CONNECTIONS'])
@@ -272,6 +284,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['DOS_ASSESSMENT_ONLY'] = project.get('dosAssessmentOnly', DEFAULT_AGENT_SETTINGS['DOS_ASSESSMENT_ONLY'])
     settings['ATTACK_SKILL_CONFIG'] = project.get('attackSkillConfig', DEFAULT_AGENT_SETTINGS['ATTACK_SKILL_CONFIG'])
     settings['USER_ATTACK_SKILLS'] = project.get('userAttackSkills', DEFAULT_AGENT_SETTINGS['USER_ATTACK_SKILLS'])
+    settings['AGENT_SKILLS'] = project.get('agentSkills', DEFAULT_AGENT_SETTINGS['AGENT_SKILLS'])
 
     # Target scope (used by guardrail checks inside the agent)
     settings['TARGET_DOMAIN'] = project.get('targetDomain', '')
@@ -369,6 +382,11 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
             else:
                 logger.warning(f"Custom LLM config {config_id} not found and no providers available")
                 settings['CUSTOM_LLM_CONFIG'] = None
+        elif model_id.startswith('claude-code/'):
+            # Find the user's Claude Code provider config to get the proxy URL
+            providers = settings.get('USER_LLM_PROVIDERS', [])
+            matched = next((p for p in providers if p.get('providerType') == 'claude_code'), None)
+            settings['CUSTOM_LLM_CONFIG'] = matched  # may be None (proxy uses default URL)
     else:
         settings['USER_LLM_PROVIDERS'] = []
         settings['USER_SETTINGS'] = {}

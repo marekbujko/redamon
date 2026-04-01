@@ -141,10 +141,15 @@ RUN chmod +x /opt/entrypoint.sh
 
 WORKDIR /opt/mcp_servers
 
-# Install ngrok (for optional single-port TCP tunneling of reverse shells)
-RUN ARCH=$(dpkg --print-architecture) && \
-    curl -sSL "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${ARCH}.tgz" \
-    | tar -xz -C /usr/local/bin
+# Install ngrok via official APT repository (for optional single-port TCP tunneling of reverse shells)
+RUN curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+        | tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
+    && echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
+        | tee /etc/apt/sources.list.d/ngrok.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ngrok \
+    && rm -rf /var/lib/apt/lists/* \
+    || echo "[WARN] ngrok installation failed — tunneling via ngrok will be unavailable"
 
 # Install chisel (for optional multi-port TCP tunneling — reverse shells + web delivery)
 RUN CHISEL_VERSION="1.11.4" && \

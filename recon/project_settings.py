@@ -385,6 +385,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'CENSYS_ENABLED': False,
     'CENSYS_API_ID': '',
     'CENSYS_API_SECRET': '',
+    'CENSYS_API_TOKEN': '',
     'FOFA_ENABLED': False,
     'FOFA_MAX_RESULTS': 1000,
     'FOFA_API_KEY': '',
@@ -885,6 +886,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     if settings.get('CENSYS_ENABLED'):
         settings['CENSYS_API_ID'] = user_global.get('censysApiId', '')
         settings['CENSYS_API_SECRET'] = user_global.get('censysApiSecret', '')
+        settings['CENSYS_API_TOKEN'] = user_global.get('censysApiToken', '')
 
     if settings.get('FOFA_ENABLED'):
         fofa_key = user_global.get('fofaApiKey', '')
