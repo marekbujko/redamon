@@ -1251,27 +1251,43 @@ GVM-specific properties (source="gvm"):
 
 ### JS Recon Scanner Nodes
 
-**JsReconFinding** - Non-secret findings from JavaScript reconnaissance analysis
-- finding_type (string): dependency_confusion, source_map_exposure, dom_sink, framework, dev_comment
-- severity (string): critical, high, medium, low, info
-- confidence (string): high, medium, low
-- title (string): human-readable finding title
-- detail (string): full finding detail (code snippet, URL, evidence)
-- evidence (string): matched pattern or code snippet
-- source_url (string): JS file where finding was discovered
-- base_url (string): parent BaseURL
-- source (string): always "js_recon"
+**JsReconFinding** - JavaScript reconnaissance findings. Two sub-types:
 
-Note: JS Recon also creates Secret nodes with source='js_recon' (not 'jsluice') and extra fields:
+1. **JS File nodes** (finding_type='js_file') - Represent each analyzed JavaScript file. All findings from that file are linked to this node.
+   - finding_type: 'js_file'
+   - title (string): filename (e.g. "app.js", "test_app.js")
+   - detail (string): full URL or upload:// path
+   - is_uploaded (boolean): true if manually uploaded, false if from pipeline crawl
+   - source_url (string): full URL or upload://filename
+
+2. **Finding nodes** (finding_type != 'js_file') - Individual findings linked to their parent JS file node.
+   - finding_type (string): dependency_confusion, source_map_exposure, dom_sink, framework, dev_comment, source_map_reference
+   - severity (string): critical, high, medium, low, info
+   - confidence (string): high, medium, low
+   - title (string): human-readable finding title
+   - detail (string): full finding detail
+   - evidence (string): matched pattern or code snippet
+   - source_url (string): JS file where finding was discovered
+   - source (string): always "js_recon"
+
+Graph hierarchy: Domain/BaseURL -> JS file node -> findings/secrets/endpoints
+- `(Domain)-[:HAS_JS_FILE]->(JsReconFinding {finding_type: 'js_file'})` for uploaded files
+- `(BaseURL)-[:HAS_JS_FILE]->(JsReconFinding {finding_type: 'js_file'})` for pipeline-crawled files
+- `(JsReconFinding {finding_type: 'js_file'})-[:HAS_JS_FINDING]->(JsReconFinding)` findings from that file
+- `(JsReconFinding {finding_type: 'js_file'})-[:HAS_SECRET]->(Secret)` secrets found in that file
+- `(JsReconFinding {finding_type: 'js_file'})-[:HAS_ENDPOINT]->(Endpoint)` endpoints extracted from that file
+
+Note: JS Recon also creates Secret nodes with source='js_recon' and extra fields:
 - validation_status (string): validated, invalid, unvalidated, skipped, incomplete
 - validation_info (string): JSON with validation details (scope, account info)
 - confidence (string): high, medium, low
-- detection_method (string): regex, jsluice
+- detection_method (string): regex
 - key_type (string): category of secret (cloud, payment, auth, etc.)
 
 When user asks about "JS findings", "JavaScript attack surface", "JS secrets", or "what did JS Recon find":
+- First query JS file nodes: MATCH (jf:JsReconFinding {finding_type: 'js_file'})
+- Then traverse to findings: (jf)-[:HAS_JS_FINDING]->(finding), (jf)-[:HAS_SECRET]->(s), (jf)-[:HAS_ENDPOINT]->(e)
 - Query Secret nodes WHERE source = 'js_recon' for secrets
-- Query JsReconFinding nodes for dependency confusion, source maps, DOM sinks, frameworks
 - Query Endpoint nodes WHERE source = 'js_recon' for JS-extracted endpoints
 
 **ThreatPulse** - OTX threat intelligence pulses (named threat reports linking IPs/domains to adversaries)
@@ -1375,11 +1391,12 @@ When user asks about "JS findings", "JavaScript attack surface", "JS secrets", o
 - `(ts:TrufflehogScan)-[:HAS_REPOSITORY]->(tr:TrufflehogRepository)` - Scan scanned repository
 - `(tr:TrufflehogRepository)-[:HAS_FINDING]->(tf:TrufflehogFinding)` - Repository has secret finding
 
-### JS Recon Relationships
-- `(b:BaseURL)-[:HAS_JS_FINDING]->(jf:JsReconFinding)` - BaseURL has JS recon finding (from pipeline scans)
-- `(d:Domain)-[:HAS_JS_FINDING]->(jf:JsReconFinding)` - Domain has JS recon finding (from uploaded files)
-- `(d:Domain)-[:HAS_SECRET]->(s:Secret)` - Domain has Secret from uploaded JS files (source='js_recon')
-- `(d:Domain)-[:HAS_ENDPOINT]->(e:Endpoint)` - Domain has Endpoint from uploaded JS files
+### JS Recon Relationships (hierarchical: parent -> file -> findings)
+- `(b:BaseURL)-[:HAS_JS_FILE]->(jf:JsReconFinding {finding_type: 'js_file'})` - BaseURL has analyzed JS file (pipeline crawl)
+- `(d:Domain)-[:HAS_JS_FILE]->(jf:JsReconFinding {finding_type: 'js_file'})` - Domain has analyzed JS file (uploaded files)
+- `(jf:JsReconFinding {finding_type: 'js_file'})-[:HAS_JS_FINDING]->(f:JsReconFinding)` - File has finding (dep confusion, DOM sink, etc.)
+- `(jf:JsReconFinding {finding_type: 'js_file'})-[:HAS_SECRET]->(s:Secret)` - File has secret (source='js_recon')
+- `(jf:JsReconFinding {finding_type: 'js_file'})-[:HAS_ENDPOINT]->(e:Endpoint)` - File has endpoint (source='js_recon')
 
 ### Gvm Exploitation Relationships
 - `(e:ExploitGvm)-[:EXPLOITED_CVE]->(c:CVE)` - GVM confirmed exploitation of CVE (only connection)

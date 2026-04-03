@@ -2900,21 +2900,22 @@ class ReconMixin:
         """
         Ingest JS Recon Scanner results into the graph.
 
-        Creates:
-        - JsReconFinding nodes (dependency confusion, source maps, DOM sinks, frameworks, dev comments)
-        - Secret nodes with source='js_recon' and validation fields
-        - Endpoint nodes with source='js_recon'
+        Graph structure:
+        - Domain/BaseURL -[:HAS_JS_FILE]-> JsReconFinding(finding_type='js_file')
+        - JsReconFinding(js_file) -[:HAS_JS_FINDING]-> JsReconFinding (findings)
+        - JsReconFinding(js_file) -[:HAS_SECRET]-> Secret
+        - JsReconFinding(js_file) -[:HAS_ENDPOINT]-> Endpoint
 
-        Relationships:
-        - (BaseURL)-[:HAS_JS_FINDING]->(JsReconFinding)
-        - (BaseURL)-[:HAS_SECRET]->(Secret)
-        - (BaseURL)-[:HAS_ENDPOINT]->(Endpoint)
+        Each analyzed JS file becomes a JsReconFinding node with finding_type='js_file'.
+        All findings discovered in that file are linked to the file node, not directly
+        to Domain/BaseURL.
         """
         js_recon_data = recon_data.get("js_recon", {})
         if not js_recon_data:
             return {"status": "skipped", "reason": "no js_recon data"}
 
         stats = {
+            "file_nodes_created": 0,
             "findings_created": 0,
             "secrets_created": 0,
             "endpoints_created": 0,
@@ -2923,13 +2924,12 @@ class ReconMixin:
         }
 
         scan_ts = js_recon_data.get("scan_metadata", {}).get("scan_timestamp", "")
+        domain_name = recon_data.get('domain', '')
 
         def _is_uploaded(source_url: str) -> bool:
-            """Check if source_url is from a manually uploaded file."""
             return source_url.startswith('upload://')
 
         def _derive_base_url(source_url: str) -> str:
-            """Derive base_url from source_url. Returns '' for uploads or invalid URLs."""
             if not source_url or _is_uploaded(source_url):
                 return ''
             try:
@@ -2940,60 +2940,123 @@ class ReconMixin:
                 pass
             return ''
 
-        # Whitelisted node labels and relationship types for Cypher f-string safety
-        _ALLOWED_LABELS = {'JsReconFinding', 'Secret', 'Endpoint'}
-        _ALLOWED_RELS = {'HAS_JS_FINDING', 'HAS_SECRET', 'HAS_ENDPOINT'}
-
-        # Get domain name from recon_data for accurate Domain node matching
-        domain_name = recon_data.get('domain', '')
-
-        def _link_to_graph(session, node_id: str, node_label: str, rel_type: str,
-                           base_url: str, source_url: str) -> bool:
-            """Link a node to BaseURL (pipeline) or Domain (uploaded files).
-
-            Uses f-string for label/rel injection but both are whitelist-validated.
-            """
-            if node_label not in _ALLOWED_LABELS:
-                return False
-            if rel_type not in _ALLOWED_RELS:
-                return False
-
-            if base_url:
-                session.run(
-                    f"""
-                    MATCH (bu:BaseURL {{url: $base_url, user_id: $uid, project_id: $pid}})
-                    MATCH (n:{node_label} {{id: $nid}})
-                    MERGE (bu)-[:{rel_type}]->(n)
-                    """,
-                    base_url=base_url, uid=user_id, pid=project_id, nid=node_id
-                )
-                return True
-            elif _is_uploaded(source_url):
-                # Link to Domain node for uploaded files
-                if domain_name:
-                    session.run(
-                        f"""
-                        MATCH (d:Domain {{name: $dname, user_id: $uid, project_id: $pid}})
-                        MATCH (n:{node_label} {{id: $nid}})
-                        MERGE (d)-[:{rel_type}]->(n)
-                        """,
-                        dname=domain_name, uid=user_id, pid=project_id, nid=node_id
-                    )
-                else:
-                    # Fallback: match any Domain for this project
-                    session.run(
-                        f"""
-                        MATCH (d:Domain {{user_id: $uid, project_id: $pid}})
-                        WITH d LIMIT 1
-                        MATCH (n:{node_label} {{id: $nid}})
-                        MERGE (d)-[:{rel_type}]->(n)
-                        """,
-                        uid=user_id, pid=project_id, nid=node_id
-                    )
-                return True
-            return False
+        def _filename_from_url(url: str) -> str:
+            if _is_uploaded(url):
+                return url.replace('upload://', '')
+            try:
+                return urlparse(url).path.split('/')[-1] or url
+            except Exception:
+                return url
 
         with self.driver.session() as session:
+            # --- 0. Collect all unique source JS files and create file nodes ---
+            all_source_urls = set()
+            for data_key in ("dependencies", "source_maps", "dom_sinks", "dev_comments"):
+                for f in js_recon_data.get(data_key, []):
+                    url = f.get("source_url", f.get("js_url", ""))
+                    if url:
+                        all_source_urls.add(url)
+            for f in js_recon_data.get("frameworks", []):
+                url = f.get("source_url", "")
+                if url:
+                    all_source_urls.add(url)
+            for s in js_recon_data.get("secrets", []):
+                url = s.get("source_url", "")
+                if url:
+                    all_source_urls.add(url)
+            for ep in js_recon_data.get("endpoints", []):
+                url = ep.get("source_js", "")
+                if url:
+                    all_source_urls.add(url)
+
+            # Map source_url -> file node id
+            file_node_ids = {}
+            for source_url in all_source_urls:
+                try:
+                    url_hash = hashlib.sha256(source_url.encode()).hexdigest()[:16]
+                    file_node_id = f"jsrf-{user_id}-{project_id}-file-{url_hash}"
+                    base_url = _derive_base_url(source_url)
+                    filename = _filename_from_url(source_url)
+
+                    props = {
+                        "id": file_node_id,
+                        "user_id": user_id,
+                        "project_id": project_id,
+                        "finding_type": "js_file",
+                        "severity": "info",
+                        "confidence": "high",
+                        "title": filename,
+                        "detail": source_url,
+                        "evidence": "",
+                        "source_url": source_url,
+                        "base_url": base_url or 'upload',
+                        "source": "js_recon",
+                        "is_uploaded": _is_uploaded(source_url),
+                        "discovered_at": scan_ts,
+                    }
+
+                    session.run(
+                        "MERGE (jf:JsReconFinding {id: $id}) SET jf += $props, jf.updated_at = datetime()",
+                        id=file_node_id, props=props
+                    )
+                    file_node_ids[source_url] = file_node_id
+                    stats["file_nodes_created"] += 1
+
+                    # Link file node to BaseURL (pipeline) or Domain (uploaded)
+                    if base_url:
+                        session.run(
+                            """
+                            MATCH (bu:BaseURL {url: $base_url, user_id: $uid, project_id: $pid})
+                            MATCH (jf:JsReconFinding {id: $fid})
+                            MERGE (bu)-[:HAS_JS_FILE]->(jf)
+                            """,
+                            base_url=base_url, uid=user_id, pid=project_id, fid=file_node_id
+                        )
+                    else:
+                        # Uploaded file or no base URL -- link to Domain
+                        if domain_name:
+                            session.run(
+                                """
+                                MATCH (d:Domain {name: $dname, user_id: $uid, project_id: $pid})
+                                MATCH (jf:JsReconFinding {id: $fid})
+                                MERGE (d)-[:HAS_JS_FILE]->(jf)
+                                """,
+                                dname=domain_name, uid=user_id, pid=project_id, fid=file_node_id
+                            )
+                        else:
+                            session.run(
+                                """
+                                MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                                WITH d LIMIT 1
+                                MATCH (jf:JsReconFinding {id: $fid})
+                                MERGE (d)-[:HAS_JS_FILE]->(jf)
+                                """,
+                                uid=user_id, pid=project_id, fid=file_node_id
+                            )
+                    stats["relationships_created"] += 1
+
+                except Exception as e:
+                    stats["errors"].append(f"JS file node creation failed ({source_url}): {e}")
+
+            def _link_to_file(session, node_id: str, node_label: str, rel_type: str, source_url: str) -> bool:
+                """Link a finding/secret/endpoint to its parent JS file node."""
+                file_node_id = file_node_ids.get(source_url)
+                if not file_node_id:
+                    return False
+                if node_label not in ('JsReconFinding', 'Secret', 'Endpoint'):
+                    return False
+                if rel_type not in ('HAS_JS_FINDING', 'HAS_SECRET', 'HAS_ENDPOINT'):
+                    return False
+                session.run(
+                    f"""
+                    MATCH (file:JsReconFinding {{id: $fid, finding_type: 'js_file'}})
+                    MATCH (n:{node_label} {{id: $nid}})
+                    MERGE (file)-[:{rel_type}]->(n)
+                    """,
+                    fid=file_node_id, nid=node_id
+                )
+                return True
+
             # --- 1. JsReconFinding nodes (non-secret findings) ---
             finding_types = [
                 ("dependencies", "dependency_confusion"),
@@ -3003,8 +3066,7 @@ class ReconMixin:
             ]
 
             for data_key, finding_type in finding_types:
-                findings = js_recon_data.get(data_key, [])
-                for finding in findings:
+                for finding in js_recon_data.get(data_key, []):
                     try:
                         finding_id = finding.get("id")
                         if not finding_id:
@@ -3036,7 +3098,7 @@ class ReconMixin:
                         )
                         stats["findings_created"] += 1
 
-                        if _link_to_graph(session, node_id, 'JsReconFinding', 'HAS_JS_FINDING', base_url, source_url):
+                        if _link_to_file(session, node_id, 'JsReconFinding', 'HAS_JS_FINDING', source_url):
                             stats["relationships_created"] += 1
 
                     except Exception as e:
@@ -3074,12 +3136,12 @@ class ReconMixin:
                     )
                     stats["findings_created"] += 1
 
-                    if _link_finding_to_graph(session, node_id, 'JsReconFinding', base_url, source_url):
+                    if _link_to_file(session, node_id, 'JsReconFinding', 'HAS_JS_FINDING', source_url):
                         stats["relationships_created"] += 1
                 except Exception as e:
                     stats["errors"].append(f"Framework finding failed: {e}")
 
-            # --- 2. Secret nodes (source='js_recon', extends existing Secret with validation) ---
+            # --- 2. Secret nodes (source='js_recon') ---
             created_secrets = set()
             for secret in js_recon_data.get("secrets", []):
                 try:
@@ -3093,10 +3155,8 @@ class ReconMixin:
 
                     source_url = secret.get("source_url", "")
                     base_url = _derive_base_url(source_url)
-
                     validation = secret.get("validation", {})
 
-                    # Create the Secret node
                     session.run(
                         """
                         MERGE (s:Secret {id: $id})
@@ -3132,8 +3192,7 @@ class ReconMixin:
                     created_secrets.add(node_id)
                     stats["secrets_created"] += 1
 
-                    # Link to BaseURL (pipeline) or Domain (uploads)
-                    if _link_to_graph(session, node_id, 'Secret', 'HAS_SECRET', base_url, source_url):
+                    if _link_to_file(session, node_id, 'Secret', 'HAS_SECRET', source_url):
                         stats["relationships_created"] += 1
 
                 except Exception as e:
@@ -3154,7 +3213,6 @@ class ReconMixin:
 
                     if not path:
                         continue
-                    # Uploaded endpoints without base_url: still create node, link to Domain
                     if not base_url and not is_upload:
                         continue
 
@@ -3186,48 +3244,15 @@ class ReconMixin:
                     )
                     stats["endpoints_created"] += 1
 
-                    # Link to BaseURL (pipeline) or Domain (uploads)
-                    ep_node_id = f"ep-{user_id}-{project_id}-{method}:{path}:{effective_baseurl}"
-                    if base_url:
-                        session.run(
-                            """
-                            MATCH (bu:BaseURL {url: $baseurl, user_id: $uid, project_id: $pid})
-                            MATCH (e:Endpoint {path: $path, method: $method, baseurl: $baseurl, user_id: $uid, project_id: $pid})
-                            MERGE (bu)-[:HAS_ENDPOINT]->(e)
-                            """,
-                            baseurl=base_url, path=path, method=method, uid=user_id, pid=project_id
-                        )
-                        stats["relationships_created"] += 1
-                    elif is_upload:
-                        if domain_name:
-                            session.run(
-                                """
-                                MATCH (d:Domain {name: $dname, user_id: $uid, project_id: $pid})
-                                MATCH (e:Endpoint {path: $path, method: $method, baseurl: $baseurl, user_id: $uid, project_id: $pid})
-                                MERGE (d)-[:HAS_ENDPOINT]->(e)
-                                """,
-                                dname=domain_name, path=path, method=method,
-                                baseurl=effective_baseurl, uid=user_id, pid=project_id
-                            )
-                        else:
-                            session.run(
-                                """
-                                MATCH (d:Domain {user_id: $uid, project_id: $pid})
-                                WITH d LIMIT 1
-                                MATCH (e:Endpoint {path: $path, method: $method, baseurl: $baseurl, user_id: $uid, project_id: $pid})
-                                MERGE (d)-[:HAS_ENDPOINT]->(e)
-                                """,
-                                path=path, method=method, baseurl=effective_baseurl,
-                                uid=user_id, pid=project_id
-                            )
+                    if _link_to_file(session, node_id, 'Endpoint', 'HAS_ENDPOINT', source_js):
                         stats["relationships_created"] += 1
 
                 except Exception as e:
                     stats["errors"].append(f"JS Recon Endpoint node failed: {e}")
 
-        print(f"[+][graph-db] JS Recon: {stats['findings_created']} findings, "
-              f"{stats['secrets_created']} secrets, {stats['endpoints_created']} endpoints, "
-              f"{stats['relationships_created']} relationships")
+        print(f"[+][graph-db] JS Recon: {stats['file_nodes_created']} files, "
+              f"{stats['findings_created']} findings, {stats['secrets_created']} secrets, "
+              f"{stats['endpoints_created']} endpoints, {stats['relationships_created']} relationships")
         if stats["errors"]:
             print(f"[!][graph-db] JS Recon: {len(stats['errors'])} errors")
 

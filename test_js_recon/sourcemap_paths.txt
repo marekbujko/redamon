@@ -1,9 +1,0 @@
-# Custom source map probe paths for Acme Corp
-# These supplement the 8 built-in paths
-
-{base}/_assets/js/{filename}.map
-{base}/webpack/{filename}.map
-{base}/static/chunks/{filename}.map
-{base}/bundles/{filename}.map
-{base}/.next/static/chunks/{filename}.map
-{base}/cdn/js/{filename}.map
