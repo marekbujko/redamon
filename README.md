@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.5.1-release-2E8B57?style=flat" alt="Version 3.5.1"/>
+  <img height="24" src="https://img.shields.io/badge/v3.6.0-release-2E8B57?style=flat" alt="Version 3.6.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -49,6 +49,16 @@
 </p>
 <p align="center">
   <em>Three AI agents test in parallel — one validates credential policies via Hydra, one verifies a CVE exploit path through privilege escalation, one maps XSS vulnerabilities across the frontend.</em>
+</p>
+
+<br/>
+
+<h2 align="center">Dynamic Multi-Tool Parallel Recon Pipeline</h2>
+<p align="center">
+<img src="assets/recon-pipeline.gif" alt="Parallel recon pipeline in action" width="100%"/>
+</p>
+<p align="center">
+  <em>RedAmon launches multiple reconnaissance tools in parallel, each feeding results into a shared knowledge graph in real time. Tools spin up, adapt their scope based on live discoveries, and coordinate without manual intervention. The entire attack surface -- subdomains, ports, endpoints, parameters -- materializes in minutes, not hours.</em>
 </p>
 
 <br/>
@@ -157,6 +167,8 @@ All lifecycle management is handled by a single script:
 | `./redamon.sh install --gvm` | Build + start with GVM/OpenVAS |
 | **`./redamon.sh update`** | **Pull latest version, smart-rebuild only changed services** |
 | `./redamon.sh up` | Start services (auto-detects GVM mode) |
+| `./redamon.sh up dev` | Start in dev mode with hot-reload |
+| `./redamon.sh up dev --gvm` | Dev mode with GVM/OpenVAS |
 | `./redamon.sh down` | Stop services (preserves data) |
 | `./redamon.sh status` | Show running services, version, GVM mode |
 | `./redamon.sh clean` | Remove containers + images, keep data |
@@ -179,22 +191,12 @@ The webapp also checks for updates automatically and shows a notification in the
 
 For contributors and active development with **Next.js fast refresh**:
 
-**Build tool images:**
 ```bash
-docker compose --profile tools build
+./redamon.sh up dev           # without GVM
+./redamon.sh up dev --gvm     # with GVM/OpenVAS
 ```
 
-**Start dev environment (without GVM):**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp
-```
-
-**Start dev environment (with GVM):**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-```
-
-The dev override swaps the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
+Tool images are built automatically on first run if they don't exist yet. The dev override swaps the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
 
 #### When to Rebuild vs Restart
 
@@ -370,7 +372,7 @@ A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progre
 | **Code Execution** | **kali_shell** | Full Kali Linux shell -- netcat, sqlmap, smbclient, msfvenom, searchsploit, and 30+ CLI tools | All | network_recon :8000 |
 | | **execute_code** | Write and run code files (Python, bash, Ruby, Perl, C, C++) -- no shell escaping | Exploit, Post | network_recon :8000 |
 
-<sub>All MCP tools run inside a Kali Linux sandbox container. Tools marked as dangerous require manual confirmation before execution. Stealth mode restricts active tools to passive-only or single-target operations.</sub>
+<sub>All MCP tools run inside a Kali Linux sandbox container. Tools marked as dangerous require manual confirmation before execution. Stealth mode restricts active tools to passive-only or single-target operations. **Note:** WPScan is licensed under the [WPScan Public Source License](https://github.com/wpscanteam/wpscan/blob/master/LICENSE) (not MIT). Free for pentesting assessments and personal use; commercial use may require a separate license from [wpscan.com](https://wpscan.com).</sub>
 
 ### AI Model Providers
 

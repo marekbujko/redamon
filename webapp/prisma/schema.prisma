@@ -88,6 +88,7 @@ model UserSettings {
   googleApiCx      String  @default("") @map("google_api_cx")
   onypheApiKey     String  @default("") @map("onyphe_api_key")
   driftnetApiKey   String  @default("") @map("driftnet_api_key")
+  wpscanApiToken   String  @default("") @map("wpscan_api_token")
 
   // Tunneling & Infrastructure
   ngrokAuthtoken  String   @default("") @map("ngrok_authtoken")

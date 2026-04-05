@@ -1011,6 +1011,7 @@ export default function GraphPage() {
         onDeleteFilter={handleDeleteFilter}
         tableViewMode={tableViewMode}
         onTableViewModeChange={setTableViewMode}
+        projectId={projectId}
         jsReconSearch={jsReconSearch}
         onJsReconSearchChange={setJsReconSearch}
         onJsReconExportXlsx={jsReconData ? () => exportJsReconXlsx(jsReconData) : undefined}

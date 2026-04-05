@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Save, X, Loader2, AlertTriangle, Download, ShieldAlert, Zap, Bookmark, FolderOpen } from 'lucide-react'
+import { Save, X, Loader2, AlertTriangle, Download, ShieldAlert, Zap, Bookmark, FolderOpen, List, GitBranch } from 'lucide-react'
+import dynamic from 'next/dynamic'
 import type { Project } from '@prisma/client'
 import { validateProjectForm } from '@/lib/validation'
 import { isHardBlockedDomain } from '@/lib/hard-guardrail'
@@ -46,6 +47,11 @@ import { SavePresetModal } from './SavePresetModal'
 import { UserPresetDrawer } from './UserPresetDrawer'
 import { getPresetById, type ReconPreset } from '@/lib/recon-presets'
 
+const WorkflowView = dynamic(
+  () => import('./WorkflowView/WorkflowView').then(m => ({ default: m.WorkflowView })),
+  { ssr: false, loading: () => <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading workflow...</div> }
+)
+
 type ProjectFormData = Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'user'>
 
 interface ConflictResult {
@@ -64,6 +70,8 @@ interface ConflictResult {
 interface ProjectFormProps {
   initialData?: Partial<ProjectFormData> & { id?: string }
   onSubmit: (data: ProjectFormData & { roeFile?: File | null }) => Promise<void>
+  /** Save without navigating away (used by workflow modal save button) */
+  onSaveAndStay?: (data: ProjectFormData & { roeFile?: File | null }) => Promise<void>
   onCancel: () => void
   isSubmitting?: boolean
   mode: 'create' | 'edit'
@@ -72,13 +80,6 @@ interface ProjectFormProps {
 }
 
 const TAB_GROUPS = [
-  {
-    label: 'Scope',
-    style: 'tabGroupScope',
-    tabs: [
-      { id: 'roe', label: 'RoE' },
-    ],
-  },
   {
     label: 'Recon Pipeline',
     style: 'tabGroupRecon',
@@ -103,6 +104,13 @@ const TAB_GROUPS = [
     ],
   },
   {
+    label: 'Scope',
+    style: 'tabGroupScope',
+    tabs: [
+      { id: 'roe', label: 'RoE' },
+    ],
+  },
+  {
     label: 'AI Agent',
     style: 'tabGroupAgent',
     tabs: [
@@ -121,6 +129,8 @@ const TAB_GROUPS = [
 ] as const
 
 type TabId = typeof TAB_GROUPS[number]['tabs'][number]['id']
+
+const RECON_TAB_IDS = new Set<string>(['preset', 'target', 'discovery', 'port', 'http', 'resource', 'jsrecon', 'vuln', 'cve', 'security'])
 
 // Minimal fallback defaults - only required fields
 // Full defaults are fetched from /api/projects/defaults (served by recon backend)
@@ -154,6 +164,7 @@ async function fetchDefaults(): Promise<Partial<ProjectFormData>> {
 export function ProjectForm({
   initialData,
   onSubmit,
+  onSaveAndStay,
   onCancel,
   isSubmitting = false,
   mode,
@@ -162,6 +173,7 @@ export function ProjectForm({
   const { alertError, alertWarning } = useAlertModal()
   const toast = useToast()
   const [activeTab, setActiveTab] = useState<TabId>('target')
+  const [viewMode, setViewMode] = useState<'tabs' | 'workflow'>('workflow')
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(mode === 'create')
   const [formData, setFormData] = useState<ProjectFormData>(() => ({
     ...MINIMAL_DEFAULTS,
@@ -348,7 +360,55 @@ export function ProjectForm({
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save project'
       if (message.toLowerCase().includes('guardrail') || message.toLowerCase().includes('permanently blocked')) {
-        // Extract the reason from guardrail error messages
+        const reason = message
+          .replace(/^Target blocked by guardrail:\s*/i, '')
+          .replace(/^Target permanently blocked:\s*/i, '')
+        setGuardrailError(reason || message)
+      } else {
+        alertError(message)
+      }
+    }
+  }
+
+  const handleSaveAndStay = async () => {
+    if (!onSaveAndStay) return
+
+    if (!formData.name.trim()) {
+      alertWarning('Project name is required')
+      return
+    }
+    if (!formData.ipMode && !formData.targetDomain.trim()) {
+      alertWarning('Target domain is required')
+      return
+    }
+    const validationErrors = validateProjectForm(formData as unknown as Record<string, unknown>)
+    if (validationErrors.length > 0) {
+      alertWarning('Validation errors:\n' + validationErrors.map(e => `- ${e.message}`).join('\n'))
+      return
+    }
+    if (!formData.ipMode && formData.targetDomain) {
+      const hardCheck = isHardBlockedDomain(formData.targetDomain)
+      if (hardCheck.blocked) {
+        setGuardrailError(hardCheck.reason)
+        return
+      }
+    }
+    if (conflict?.hasConflict) {
+      alertError('Cannot save project: ' + conflict.message)
+      return
+    }
+    try {
+      const submitData = {
+        ...formData,
+        reconPresetId: appliedPreset?.id ?? formData.reconPresetId ?? null,
+        ...(roeFile ? { roeFile } : {}),
+        ...(mode === 'create' && projectId ? { id: projectId } : {}),
+      }
+      await onSaveAndStay(submitData)
+      toast.success('Project saved')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save project'
+      if (message.toLowerCase().includes('guardrail') || message.toLowerCase().includes('permanently blocked')) {
         const reason = message
           .replace(/^Target blocked by guardrail:\s*/i, '')
           .replace(/^Target permanently blocked:\s*/i, '')
@@ -465,36 +525,102 @@ export function ProjectForm({
         </div>
       ) : (
         <>
+          <div className={styles.tabsWrapper}>
           <div className={styles.tabs}>
             {TAB_GROUPS.map((group, gi) => (
               <div key={gi} className={group.style ? styles[group.style] : styles.tabGroup}>
-                {group.label && (
-                  <span className={styles.tabGroupLabel}>{group.label}</span>
+                {group.label === 'Recon Pipeline' ? (
+                  <>
+                    <div className={styles.reconGroupInner}>
+                      <div className={styles.viewModeToggle}>
+                        <button
+                          type="button"
+                          className={`${styles.viewModeOption} ${viewMode === 'tabs' ? styles.viewModeOptionActive : ''}`}
+                          onClick={() => setViewMode('tabs')}
+                          title="Tab view"
+                        >
+                          <List size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.viewModeOption} ${viewMode === 'workflow' ? styles.viewModeOptionActive : ''}`}
+                          onClick={() => {
+                            setViewMode('workflow')
+                            if (!RECON_TAB_IDS.has(activeTab)) setActiveTab('target')
+                          }}
+                          title="Workflow view"
+                        >
+                          <GitBranch size={11} />
+                        </button>
+                      </div>
+                      <div className={styles.reconGroupContent}>
+                        <span className={styles.tabGroupLabel}>{group.label}</span>
+                        <div className={styles.tabGroupTabs}>
+                          {group.tabs.map(tab => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              className={`tab ${activeTab === tab.id ? 'tabActive' : ''} ${styles.compactTab} ${tab.id === 'preset' ? styles.presetTab : ''} ${tab.id !== 'preset' && viewMode !== 'tabs' ? styles.hiddenTab : ''}`}
+                              onClick={() => {
+                                if ((tab.id as string) === 'preset') {
+                                  setIsPresetModalOpen(true)
+                                } else if (viewMode === 'tabs') {
+                                  setActiveTab(tab.id)
+                                }
+                              }}
+                            >
+                              {tab.id === 'preset' && <Zap size={15} className={styles.presetIcon} />}
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {group.label && (
+                      <span className={styles.tabGroupLabel}>{group.label}</span>
+                    )}
+                    <div className={styles.tabGroupTabs}>
+                      {group.tabs.map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          className={`tab ${activeTab === tab.id ? 'tabActive' : ''} ${styles.compactTab} ${'wide' in tab && tab.wide ? styles.wideTab : ''} ${(tab.id as string) === 'preset' ? styles.presetTab : ''}`}
+                          onClick={() => {
+                            if ((tab.id as string) === 'preset') {
+                              setIsPresetModalOpen(true)
+                            } else {
+                              setActiveTab(tab.id)
+                            }
+                          }}
+                        >
+                          {(tab.id as string) === 'preset' && <Zap size={15} className={styles.presetIcon} />}
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
-                <div className={styles.tabGroupTabs}>
-                  {group.tabs.map(tab => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      className={`tab ${activeTab === tab.id ? 'tabActive' : ''} ${styles.compactTab} ${'wide' in tab && tab.wide ? styles.wideTab : ''} ${tab.id === 'preset' ? styles.presetTab : ''}`}
-                      onClick={() => {
-                        if (tab.id === 'preset') {
-                          setIsPresetModalOpen(true)
-                        } else {
-                          setActiveTab(tab.id)
-                        }
-                      }}
-                    >
-                      {tab.id === 'preset' && <Zap size={15} className={styles.presetIcon} />}
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
               </div>
             ))}
           </div>
+          </div>
 
-          <div className={styles.content}>
+          <div className={viewMode === 'workflow' && RECON_TAB_IDS.has(activeTab) ? styles.contentWorkflow : styles.content}>
+            {/* Workflow view -- replaces recon tab content when in workflow mode */}
+            {viewMode === 'workflow' && RECON_TAB_IDS.has(activeTab) && (
+              <WorkflowView
+                formData={formData}
+                updateField={updateField}
+                projectId={projectId}
+                mode={mode}
+                onSave={onSaveAndStay ? handleSaveAndStay : undefined}
+              />
+            )}
+
+            {/* Tab-based views */}
             {activeTab === 'roe' && (
           <RoeSection
             data={formData}
@@ -505,14 +631,14 @@ export function ProjectForm({
           />
         )}
 
-        {activeTab === 'target' && (
+        {activeTab === 'target' && viewMode === 'tabs' && (
           <>
             <TargetSection data={formData} updateField={updateField} mode={mode} />
             <ScanModulesSection data={formData} updateField={updateField} />
           </>
         )}
 
-        {activeTab === 'discovery' && (
+        {activeTab === 'discovery' && viewMode === 'tabs' && (
           <>
             <SubdomainDiscoverySection data={formData} updateField={updateField} />
             <ShodanSection data={formData} updateField={updateField} />
@@ -521,7 +647,7 @@ export function ProjectForm({
           </>
         )}
 
-        {activeTab === 'port' && (
+        {activeTab === 'port' && viewMode === 'tabs' && (
           <>
             {!formData.naabuEnabled && !formData.masscanEnabled && (
               <div className={styles.shodanWarning}>
@@ -535,11 +661,11 @@ export function ProjectForm({
           </>
         )}
 
-        {activeTab === 'http' && (
+        {activeTab === 'http' && viewMode === 'tabs' && (
           <HttpxSection data={formData} updateField={updateField} />
         )}
 
-        {activeTab === 'resource' && (
+        {activeTab === 'resource' && viewMode === 'tabs' && (
           <>
             <KatanaSection data={formData} updateField={updateField} />
             <HakrawlerSection data={formData} updateField={updateField} />
@@ -552,22 +678,22 @@ export function ProjectForm({
           </>
         )}
 
-        {activeTab === 'jsrecon' && (
+        {activeTab === 'jsrecon' && viewMode === 'tabs' && (
           <JsReconSection data={formData} updateField={updateField} projectId={projectId} mode={mode} />
         )}
 
-        {activeTab === 'vuln' && (
+        {activeTab === 'vuln' && viewMode === 'tabs' && (
           <NucleiSection data={formData} updateField={updateField} />
         )}
 
-        {activeTab === 'cve' && (
+        {activeTab === 'cve' && viewMode === 'tabs' && (
           <>
             <CveLookupSection data={formData} updateField={updateField} />
             <MitreSection data={formData} updateField={updateField} />
           </>
         )}
 
-        {activeTab === 'security' && (
+        {activeTab === 'security' && viewMode === 'tabs' && (
           <SecurityChecksSection data={formData} updateField={updateField} />
         )}
 

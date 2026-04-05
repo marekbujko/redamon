@@ -15,7 +15,7 @@ interface NmapSectionProps {
 }
 
 export function NmapSection({ data, updateField }: NmapSectionProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
 
   return (
     <div className={styles.section}>

@@ -17,40 +17,55 @@ export default function NewProjectPage() {
   const { alertError, alertWarning } = useAlertModal()
   const toast = useToast()
 
-  const handleSubmit = async (data: ProjectFormData & { roeFile?: File | null }) => {
+  const createProject = async (data: ProjectFormData & { roeFile?: File | null }) => {
     if (!userId) {
       await alertWarning('Please select a user first')
       router.push('/projects')
-      return
+      return null
     }
 
+    const { roeFile, ...projectData } = data
+    const project = await createProjectMutation.mutateAsync({
+      ...projectData,
+      userId,
+      name: projectData.name,
+      targetDomain: projectData.targetDomain,
+      roeFile,
+    })
+
+    setCurrentProject({
+      id: project.id,
+      name: project.name,
+      targetDomain: project.targetDomain,
+      description: project.description || undefined,
+      createdAt: project.createdAt.toString(),
+      updatedAt: project.updatedAt.toString()
+    })
+
+    return project
+  }
+
+  const handleSubmit = async (data: ProjectFormData & { roeFile?: File | null }) => {
     try {
-      const { roeFile, ...projectData } = data
-      const project = await createProjectMutation.mutateAsync({
-        ...projectData,
-        userId,
-        name: projectData.name,
-        targetDomain: projectData.targetDomain,
-        roeFile,
-      })
-
-      setCurrentProject({
-        id: project.id,
-        name: project.name,
-        targetDomain: project.targetDomain,
-        description: project.description || undefined,
-        createdAt: project.createdAt.toString(),
-        updatedAt: project.updatedAt.toString()
-      })
-
-      toast.success('Project created')
-      router.push(`/graph?project=${project.id}`)
+      const project = await createProject(data)
+      if (project) {
+        toast.success('Project created')
+        router.push(`/graph?project=${project.id}`)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create project'
       if (message.toLowerCase().includes('guardrail')) {
-        throw error // Let ProjectForm handle guardrail errors with its modal
+        throw error
       }
       alertError(message)
+    }
+  }
+
+  const handleSaveAndStay = async (data: ProjectFormData & { roeFile?: File | null }) => {
+    const project = await createProject(data)
+    if (project) {
+      toast.success('Project created')
+      router.replace(`/projects/${project.id}/settings`)
     }
   }
 
@@ -76,6 +91,7 @@ export default function NewProjectPage() {
       <ProjectForm
         mode="create"
         onSubmit={handleSubmit}
+        onSaveAndStay={handleSaveAndStay}
         onCancel={handleCancel}
         isSubmitting={createProjectMutation.isPending}
       />

@@ -13,6 +13,11 @@
   background: var(--bg-secondary);
 }
 
+:global([data-theme="light"]) .header {
+  background: #eeeef2;
+  border-bottom-color: #dddde3;
+}
+
 .title {
   font-size: var(--text-lg);
   font-weight: var(--font-semibold);
@@ -26,13 +31,25 @@
   gap: var(--space-2);
 }
 
+.tabsWrapper {
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-tertiary);
+  width: 100%;
+}
+
+:global([data-theme="light"]) .tabsWrapper {
+  background: #e8e8ed;
+  border-bottom-color: #dddde3;
+}
+
 .tabs {
   display: flex;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-default);
-  background: var(--bg-tertiary);
+  padding: var(--space-4) var(--space-3) var(--space-1);
   align-items: stretch;
+  max-width: 1220px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .tabGroup {
@@ -83,6 +100,38 @@
   align-items: center;
 }
 
+/* ---- Light mode: stronger tab group tinting ---- */
+
+:global([data-theme="light"]) .tabGroup {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+:global([data-theme="light"]) .tabGroupScope {
+  background: rgba(59, 130, 246, 0.10);
+  border-color: rgba(59, 130, 246, 0.22);
+}
+
+:global([data-theme="light"]) .tabGroupRecon {
+  background: rgba(34, 197, 94, 0.10);
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+:global([data-theme="light"]) .tabGroupOther {
+  background: rgba(234, 179, 8, 0.10);
+  border-color: rgba(234, 179, 8, 0.22);
+}
+
+:global([data-theme="light"]) .tabGroupAgent {
+  background: rgba(168, 85, 247, 0.10);
+  border-color: rgba(168, 85, 247, 0.22);
+}
+
+:global([data-theme="light"]) .tabGroupRemediation {
+  background: rgba(251, 146, 60, 0.10);
+  border-color: rgba(251, 146, 60, 0.22);
+}
+
 .tabGroupPlain {
   display: flex;
   flex-direction: column;
@@ -98,6 +147,78 @@
   padding: 0 2px;
 }
 
+:global([data-theme="light"]) .tabGroupLabel {
+  color: var(--text-secondary);
+}
+
+:global([data-theme="light"]) .compactTab {
+  color: var(--text-primary);
+}
+
+.reconGroupInner {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  height: 100%;
+}
+
+.reconGroupContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tabGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viewModeToggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: stretch;
+  justify-content: center;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding-right: 6px;
+}
+
+.viewModeOption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.viewModeOption:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.viewModeOptionActive {
+  background: rgba(34, 197, 94, 0.15);
+  color: rgba(34, 197, 94, 0.9);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.viewModeOptionActive:hover {
+  background: rgba(34, 197, 94, 0.2);
+  color: rgba(34, 197, 94, 1);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
 .tabGroupTabs {
   display: flex;
   gap: 2px;
@@ -111,6 +232,11 @@
   text-align: center;
   line-height: 1.2;
   white-space: normal !important;
+}
+
+.hiddenTab {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .wideTab {
@@ -158,6 +284,17 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  max-width: 1220px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.contentWorkflow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
 }
 
 .loadingContainer {

@@ -16,7 +16,7 @@ interface ShodanSectionProps {
 }
 
 export function ShodanSection({ data, updateField }: ShodanSectionProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
   const { userId } = useProject()
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null) // null = loading
 

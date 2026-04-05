@@ -26,7 +26,7 @@ interface KeyStatus {
 }
 
 export function OsintEnrichmentSection({ data, updateField }: OsintEnrichmentSectionProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
   const { userId } = useProject()
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
 

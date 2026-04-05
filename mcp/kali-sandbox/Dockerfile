@@ -62,6 +62,9 @@ RUN apt-get install -y --fix-missing \
     # Masscan port scanner (for AI agent network reconnaissance)
     masscan \
     # WPScan WordPress vulnerability scanner
+    # NOTE: WPScan is licensed under the WPScan Public Source License (NOT MIT).
+    # Free for pentesting assessments and personal use. Commercial use may require
+    # a separate license from https://wpscan.com. See: github.com/wpscanteam/wpscan/blob/master/LICENSE
     wpscan \
     # Clean up
     && rm -rf /var/lib/apt/lists/*

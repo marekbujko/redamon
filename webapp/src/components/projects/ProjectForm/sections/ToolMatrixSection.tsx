@@ -29,6 +29,12 @@ const TOOL_KEY_INFO: Record<string, { field: string; label: string; hint: string
     hint: 'Enables google_dork tool for Google dorking OSINT (site:, inurl:, filetype:)',
     url: 'https://serpapi.com/manage-api-key',
   },
+  execute_wpscan: {
+    field: 'wpscanApiToken',
+    label: 'WPScan',
+    hint: 'Enriches execute_wpscan results with vulnerability data from the WPScan database (free: 25 req/day)',
+    url: 'https://wpscan.com/register',
+  },
 }
 
 interface ToolMatrixSectionProps {
@@ -58,6 +64,7 @@ export function ToolMatrixSection({ data, updateField }: ToolMatrixSectionProps)
         if (!settings.tavilyApiKey) missing.add('web_search')
         if (!settings.shodanApiKey) missing.add('shodan')
         if (!settings.serpApiKey) missing.add('google_dork')
+        if (!settings.wpscanApiToken) missing.add('execute_wpscan')
         setMissingKeys(missing)
       })
       .catch(() => {})

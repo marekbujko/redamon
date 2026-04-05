@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.0] - 2026-04-05
+
+### Added
+
+- **Recon Pipeline Workflow View** -- interactive visual diagram of the entire reconnaissance pipeline, available as an alternative to the tabbed settings interface. Toggle between Tab View and Workflow View using the icons at the left edge of the Recon Pipeline tab group:
+  - **Three-band layout** -- tools in the center horizontal row, consumed data nodes above, produced data nodes below, with dashed animated edges showing data flow direction
+  - **22 tool nodes** covering all pipeline stages: Discovery (Subdomain Discovery, URLScan, Uncover), OSINT (Shodan, OSINT Enrichment), Port Scanning (Naabu, Masscan, Nmap), HTTP Probing (Httpx), Resource Enumeration (Katana, Hakrawler, jsluice, FFuf, GAU, ParamSpider, Kiterunner, Arjun), JS Recon, Vulnerability Scanning (Nuclei), CVE & MITRE (CVE Lookup, MITRE), Security Checks
+  - **18 data node types** as visible convergence points (Domain, Subdomain, IP, DNSRecord, Port, Service, BaseURL, Endpoint, Parameter, Header, Certificate, Technology, Vulnerability, CVE, MitreData, Capec, Secret, ExternalDomain), colored by category (identity, network, web, technology, security, external)
+  - **Chain-breaking detection** -- when a tool is enabled but its required input data has no active producer, the data node turns red (starved) and the tool shows an amber warning with a detailed tooltip. Uses "true source" algorithm that excludes tools recycling their own output (e.g., Katana consumes and produces BaseURL)
+  - **Click highlighting** -- click any tool or data node to highlight it and all directly connected elements; non-connected edges dim for visual clarity
+  - **Inline enable/disable toggles** on each tool node, with changes immediately reflected in both views
+  - **Settings modal** -- click the gear icon on any tool to open the full settings panel (identical to Tab View) in a modal overlay
+  - **Shared state** -- both views read and write the same form data with zero re-fetching; React Query cache untouched
+  - **Code-split** -- Workflow View loaded via `next/dynamic` so React Flow only loads when the workflow toggle is activated
+
+- **Verified node mapping** -- deep-audited every tool's consumes/produces against the actual recon pipeline code. Fixed 15+ inaccuracies in the node mapping (added missing ExternalDomain outputs to 8 tools, corrected Shodan/Masscan/Nmap/Httpx input dependencies, added Technology output to Shodan/OSINT Enrichment/JsRecon, removed incorrect Service/Domain consumption from multiple tools)
+
+### Changed
+
+- **Node mapping corrections** -- updated `nodeMapping.ts` with verified produces/consumes for all 22 recon tools. Affects both the workflow diagram edges and the NodeInfoTooltip in tab mode
+
+---
+
 ## [3.5.1] - 2026-04-05
 
 ### Added

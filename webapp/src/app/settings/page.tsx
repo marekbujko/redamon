@@ -36,6 +36,7 @@ interface UserSettings {
   googleApiCx: string
   onypheApiKey: string
   driftnetApiKey: string
+  wpscanApiToken: string
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
@@ -65,6 +66,7 @@ const EMPTY_SETTINGS: UserSettings = {
   googleApiCx: '',
   onypheApiKey: '',
   driftnetApiKey: '',
+  wpscanApiToken: '',
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
@@ -95,6 +97,7 @@ const TOOL_NAME_MAP: Record<string, string> = {
   hunterHowApiKey: 'hunterhow',
   onypheApiKey: 'onyphe',
   driftnetApiKey: 'driftnet',
+  wpscanApiToken: 'wpscan',
 }
 
 function getProviderIcon(providerType: string): string {
@@ -519,6 +522,7 @@ export default function SettingsPage() {
           googleApiCx: data.googleApiCx || '',
           onypheApiKey: data.onypheApiKey || '',
           driftnetApiKey: data.driftnetApiKey || '',
+          wpscanApiToken: data.wpscanApiToken || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -609,6 +613,7 @@ export default function SettingsPage() {
           googleApiCx: data.googleApiCx || '',
           onypheApiKey: data.onypheApiKey || '',
           driftnetApiKey: data.driftnetApiKey || '',
+          wpscanApiToken: data.wpscanApiToken || '',
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -997,6 +1002,18 @@ export default function SettingsPage() {
               onChange={v => updateSetting('serpApiKey', v)}
               onConfigureRotation={() => openRotationModal('serpApiKey')}
               rotationInfo={rotationConfigs.serp || null}
+            />
+            <SecretField
+              label="WPScan API Token"
+              hint="Enriches execute_wpscan results with vulnerability data from the WPScan database. Free: 25 requests/day"
+              signupUrl="https://wpscan.com/register"
+              badges={['AI Agent']}
+              value={settings.wpscanApiToken}
+              visible={!!visibleFields.wpscanApiToken}
+              onToggle={() => toggleFieldVisibility('wpscanApiToken')}
+              onChange={v => updateSetting('wpscanApiToken', v)}
+              onConfigureRotation={() => openRotationModal('wpscanApiToken')}
+              rotationInfo={rotationConfigs.wpscan || null}
             />
             <SecretField
               label="NVD API Key"

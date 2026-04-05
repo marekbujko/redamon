@@ -25,7 +25,7 @@ const METHOD_LABELS: Record<string, string> = {
 }
 
 export function ArjunSection({ data, updateField }: ArjunSectionProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
 
   const toggleMethod = (method: string) => {
     const current = data.arjunMethods ?? ['GET']
