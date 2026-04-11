@@ -3596,5 +3596,26 @@ class ReconMixin:
                     "source": "graph" if record["domain"] else "settings",
                 }
 
+            elif tool_id == "Naabu":
+                # Get domain, subdomain count, and IP count for port scanning
+                result = session.run(
+                    """
+                    OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+                    OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
+                    OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
+                    WITH d, count(DISTINCT s) AS sub_count,
+                         count(DISTINCT i) + count(DISTINCT di) AS ip_count
+                    RETURN d.name AS domain, sub_count, ip_count
+                    """,
+                    uid=user_id, pid=project_id,
+                )
+                record = result.single()
+                return {
+                    "domain": record["domain"] if record["domain"] else None,
+                    "existing_subdomains_count": record["sub_count"] or 0,
+                    "existing_ips_count": record["ip_count"] or 0,
+                    "source": "graph" if record["domain"] else "settings",
+                }
+
             return {"error": f"Unknown tool_id: {tool_id}"}
 

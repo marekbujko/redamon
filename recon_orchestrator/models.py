@@ -223,7 +223,8 @@ class PartialReconStartRequest(BaseModel):
     webapp_api_url: str
     tool_id: str                              # e.g. "SubdomainDiscovery"
     graph_inputs: dict                        # e.g. {"domain": "example.com"}
-    user_inputs: list[str] = []               # user-added values
+    user_inputs: list[str] = []               # user-added values (SubdomainDiscovery)
+    user_targets: dict | None = None          # structured inputs (Naabu: {subdomains, ips, ip_attach_to})
     dedup_enabled: bool = True
     settings_overrides: dict = {}             # optional per-tool settings
 

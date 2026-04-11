@@ -2,12 +2,14 @@ import { describe, test, expect } from 'vitest'
 import {
   PARTIAL_RECON_SUPPORTED_TOOLS,
   PARTIAL_RECON_PHASES,
+  PARTIAL_RECON_PHASE_MAP,
 } from './recon-types'
 import type {
   PartialReconStatus,
   PartialReconState,
   GraphInputs,
   PartialReconParams,
+  UserTargets,
 } from './recon-types'
 
 // === PARTIAL_RECON_SUPPORTED_TOOLS ===
@@ -16,22 +18,44 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('SubdomainDiscovery')).toBe(true)
   })
 
+  test('contains Naabu', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Naabu')).toBe(true)
+  })
+
   test('does not contain unsupported tools', () => {
-    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Naabu')).toBe(false)
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Nuclei')).toBe(false)
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Httpx')).toBe(false)
   })
 })
 
-// === PARTIAL_RECON_PHASES ===
+// === PARTIAL_RECON_PHASE_MAP ===
+describe('PARTIAL_RECON_PHASE_MAP', () => {
+  test('has SubdomainDiscovery phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['SubdomainDiscovery']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['SubdomainDiscovery'][0]).toBe('Subdomain Discovery')
+  })
+
+  test('has Naabu phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Naabu']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Naabu'][0]).toBe('Port Scanning')
+  })
+
+  test('each supported tool has a phase entry', () => {
+    for (const toolId of PARTIAL_RECON_SUPPORTED_TOOLS) {
+      expect(PARTIAL_RECON_PHASE_MAP[toolId]).toBeDefined()
+      expect(PARTIAL_RECON_PHASE_MAP[toolId].length).toBeGreaterThan(0)
+    }
+  })
+})
+
+// === PARTIAL_RECON_PHASES (backward compat) ===
 describe('PARTIAL_RECON_PHASES', () => {
-  test('has exactly 1 phase for subdomain discovery', () => {
+  test('defaults to SubdomainDiscovery phases', () => {
     expect(PARTIAL_RECON_PHASES).toHaveLength(1)
     expect(PARTIAL_RECON_PHASES[0]).toBe('Subdomain Discovery')
   })
 
-  test('is typed as readonly (as const)', () => {
-    // `as const` creates a readonly tuple at the type level, not frozen at runtime
+  test('is an array', () => {
     expect(Array.isArray(PARTIAL_RECON_PHASES)).toBe(true)
   })
 })
@@ -125,6 +149,16 @@ describe('GraphInputs type shape', () => {
     }
     expect(inputs.domain).toBeNull()
   })
+
+  test('with existing_ips_count for Naabu', () => {
+    const inputs: GraphInputs = {
+      domain: 'example.com',
+      existing_subdomains_count: 10,
+      existing_ips_count: 5,
+      source: 'graph',
+    }
+    expect(inputs.existing_ips_count).toBe(5)
+  })
 })
 
 describe('PartialReconParams type shape', () => {
@@ -152,5 +186,59 @@ describe('PartialReconParams type shape', () => {
     expect(params.user_inputs).toHaveLength(2)
     expect(params.dedup_enabled).toBe(false)
     expect(params.settings_overrides).toBeDefined()
+  })
+
+  test('Naabu params with structured user_targets', () => {
+    const targets: UserTargets = {
+      subdomains: ['api.example.com'],
+      ips: ['10.0.0.1', '192.168.1.0/24'],
+      ip_attach_to: 'api.example.com',
+    }
+    const params: PartialReconParams = {
+      tool_id: 'Naabu',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: targets,
+      dedup_enabled: true,
+    }
+    expect(params.tool_id).toBe('Naabu')
+    expect(params.user_targets?.subdomains).toHaveLength(1)
+    expect(params.user_targets?.ips).toHaveLength(2)
+    expect(params.user_targets?.ip_attach_to).toBe('api.example.com')
+  })
+
+  test('Naabu params with generic IPs (no attach)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Naabu',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: { subdomains: [], ips: ['10.0.0.1'], ip_attach_to: null },
+      dedup_enabled: true,
+    }
+    expect(params.user_targets?.ip_attach_to).toBeNull()
+  })
+
+  test('Naabu params without user_targets (graph only)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Naabu',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      dedup_enabled: true,
+    }
+    expect(params.user_targets).toBeUndefined()
+  })
+})
+
+describe('GraphInputs with existing_subdomains', () => {
+  test('Naabu graph inputs include subdomain list', () => {
+    const inputs: GraphInputs = {
+      domain: 'example.com',
+      existing_subdomains_count: 2,
+      existing_subdomains: ['www.example.com', 'api.example.com'],
+      existing_ips_count: 5,
+      source: 'graph',
+    }
+    expect(inputs.existing_subdomains).toHaveLength(2)
+    expect(inputs.existing_subdomains).toContain('api.example.com')
   })
 })

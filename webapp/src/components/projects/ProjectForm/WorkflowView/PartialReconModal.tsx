@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Play, Loader2, ArrowRight } from 'lucide-react'
 import { Modal } from '@/components/ui'
-import type { GraphInputs, PartialReconParams } from '@/lib/recon-types'
+import type { GraphInputs, PartialReconParams, UserTargets } from '@/lib/recon-types'
 import { SECTION_INPUT_MAP, SECTION_NODE_MAP } from '../nodeMapping'
 import { WORKFLOW_TOOLS } from './workflowDefinition'
 
@@ -18,6 +18,91 @@ interface PartialReconModalProps {
   isStarting?: boolean
 }
 
+const TOOL_DESCRIPTIONS: Record<string, string> = {
+  SubdomainDiscovery:
+    'Discovers subdomains using 5 tools in parallel (crt.sh, HackerTarget, Subfinder, Amass, Knockpy), ' +
+    'filters wildcards with Puredns, then resolves full DNS records (A, AAAA, MX, NS, TXT, SOA, CNAME) for each. ' +
+    'Results are merged into the existing graph -- duplicates are updated, not recreated.',
+  Naabu:
+    'Scans discovered IPs and subdomains for open ports using Naabu (Docker-based). ' +
+    'Targets are loaded from the graph (subdomains + IPs from prior discovery). ' +
+    'You can also provide custom subdomains or IPs below. ' +
+    'Port and Service nodes are merged into the existing graph -- duplicates are updated, not recreated.',
+}
+
+// --- Validation helpers ---
+
+const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/
+const IPV6_RE = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
+const CIDR_V4_RE = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
+const CIDR_V6_RE = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\/\d{1,3}$/
+const HOSTNAME_RE = /^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/
+
+function validateIp(value: string): string | null {
+  if (IPV4_RE.test(value)) {
+    const octets = value.split('.').map(Number)
+    if (octets.some(o => o > 255)) return `Invalid IP: ${value}`
+    return null
+  }
+  if (IPV6_RE.test(value)) return null
+  if (CIDR_V4_RE.test(value)) {
+    const [ip, prefix] = value.split('/')
+    const octets = ip.split('.').map(Number)
+    if (octets.some(o => o > 255)) return `Invalid CIDR: ${value}`
+    const pfx = parseInt(prefix, 10)
+    if (pfx < 24 || pfx > 32) return `CIDR prefix must be /24 to /32, got /${pfx}`
+    return null
+  }
+  if (CIDR_V6_RE.test(value)) {
+    const prefix = parseInt(value.split('/')[1], 10)
+    if (prefix < 120 || prefix > 128) return `IPv6 CIDR prefix must be /120 to /128, got /${prefix}`
+    return null
+  }
+  return `Invalid IP or CIDR: ${value}`
+}
+
+function validateSubdomain(value: string, projectDomain: string): string | null {
+  if (!HOSTNAME_RE.test(value)) return `Invalid hostname: ${value}`
+  if (projectDomain && !value.endsWith('.' + projectDomain) && value !== projectDomain) {
+    return `${value} is not a subdomain of ${projectDomain}`
+  }
+  return null
+}
+
+function validateLines(text: string, validator: (v: string) => string | null) {
+  if (!text.trim()) return { errors: [] as { line: number; error: string }[], validCount: 0 }
+  const lines = text.split('\n').map(s => s.trim()).filter(Boolean)
+  const errors: { line: number; error: string }[] = []
+  let validCount = 0
+  lines.forEach((line, i) => {
+    const err = validator(line)
+    if (err) errors.push({ line: i + 1, error: err })
+    else validCount++
+  })
+  return { errors, validCount }
+}
+
+// --- Shared inline styles ---
+
+const textareaStyle = (hasError: boolean) => ({
+  width: '100%',
+  padding: '8px 10px',
+  borderRadius: '6px',
+  border: `1px solid ${hasError ? '#ef4444' : 'var(--border-color, #334155)'}`,
+  backgroundColor: 'var(--bg-secondary, #1e293b)',
+  color: 'var(--text-primary, #e2e8f0)',
+  fontSize: '12px',
+  fontFamily: 'monospace',
+  resize: 'vertical' as const,
+})
+
+const labelStyle = { fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary, #94a3b8)', marginBottom: '4px' }
+const hintStyle = { fontSize: '10px', color: 'var(--text-muted, #64748b)', marginTop: '2px' }
+const errorListStyle = { marginTop: '4px', display: 'flex', flexDirection: 'column' as const, gap: '2px' }
+const errorLineStyle = { fontSize: '10px', color: '#f87171' }
+
+// --- Component ---
+
 export function PartialReconModal({
   isOpen,
   toolId,
@@ -30,39 +115,105 @@ export function PartialReconModal({
 }: PartialReconModalProps) {
   const [graphInputs, setGraphInputs] = useState<GraphInputs | null>(null)
   const [loadingInputs, setLoadingInputs] = useState(false)
+  // Naabu-specific state
+  const [customSubdomains, setCustomSubdomains] = useState('')
+  const [customIps, setCustomIps] = useState('')
+  const [ipAttachTo, setIpAttachTo] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isOpen || !toolId || !projectId) return
     setLoadingInputs(true)
+    setCustomSubdomains('')
+    setCustomIps('')
+    setIpAttachTo(null)
     fetch(`/api/recon/${projectId}/graph-inputs/${toolId}`)
       .then(res => res.ok ? res.json() : null)
       .then((data: GraphInputs | null) => {
-        setGraphInputs(data || { domain: targetDomain || null, existing_subdomains_count: 0, source: 'settings' })
+        setGraphInputs(data || { domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, source: 'settings' })
         setLoadingInputs(false)
       })
       .catch(() => {
-        setGraphInputs({ domain: targetDomain || null, existing_subdomains_count: 0, source: 'settings' })
+        setGraphInputs({ domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, source: 'settings' })
         setLoadingInputs(false)
       })
   }, [isOpen, toolId, projectId, targetDomain])
 
-  const handleRun = useCallback(() => {
-    const domain = graphInputs?.domain || targetDomain || ''
-    if (!domain) return
+  const domain = graphInputs?.domain || targetDomain || ''
+  const isNaabu = toolId === 'Naabu'
 
-    onConfirm({
-      tool_id: toolId || '',
-      graph_inputs: { domain },
-      user_inputs: [],
-      dedup_enabled: true,
-    })
-  }, [graphInputs, targetDomain, toolId, onConfirm])
+  // Subdomain validation
+  const subdomainValidation = useMemo(
+    () => validateLines(customSubdomains, v => validateSubdomain(v, domain)),
+    [customSubdomains, domain],
+  )
+
+  // IP validation
+  const ipValidation = useMemo(
+    () => validateLines(customIps, validateIp),
+    [customIps],
+  )
+
+  const hasValidationErrors = subdomainValidation.errors.length > 0 || ipValidation.errors.length > 0
+
+  // Build dropdown options: graph subdomains + custom subdomains (live)
+  const attachToOptions = useMemo(() => {
+    const graphSubs = graphInputs?.existing_subdomains || []
+    const customSubs = customSubdomains
+      .split('\n')
+      .map(s => s.trim().toLowerCase())
+      .filter(s => s && HOSTNAME_RE.test(s) && (s.endsWith('.' + domain) || s === domain))
+    // Deduplicate, graph first
+    const seen = new Set<string>()
+    const options: { value: string; label: string; source: string }[] = []
+    for (const s of graphSubs) {
+      if (!seen.has(s)) { seen.add(s); options.push({ value: s, label: s, source: 'graph' }) }
+    }
+    for (const s of customSubs) {
+      if (!seen.has(s)) { seen.add(s); options.push({ value: s, label: s, source: 'custom' }) }
+    }
+    return options
+  }, [graphInputs?.existing_subdomains, customSubdomains, domain])
+
+  // If selected attach_to was removed from options, reset to null
+  useEffect(() => {
+    if (ipAttachTo && !attachToOptions.some(o => o.value === ipAttachTo)) {
+      setIpAttachTo(null)
+    }
+  }, [attachToOptions, ipAttachTo])
+
+  const handleRun = useCallback(() => {
+    if (!domain || hasValidationErrors) return
+
+    if (isNaabu) {
+      const subdomains = customSubdomains.split('\n').map(s => s.trim()).filter(Boolean)
+      const ips = customIps.split('\n').map(s => s.trim()).filter(Boolean)
+      const userTargets: UserTargets | undefined = (subdomains.length || ips.length)
+        ? { subdomains, ips, ip_attach_to: ipAttachTo }
+        : undefined
+
+      onConfirm({
+        tool_id: toolId || '',
+        graph_inputs: { domain },
+        user_inputs: [],
+        user_targets: userTargets,
+        dedup_enabled: true,
+      })
+    } else {
+      onConfirm({
+        tool_id: toolId || '',
+        graph_inputs: { domain },
+        user_inputs: [],
+        dedup_enabled: true,
+      })
+    }
+  }, [domain, hasValidationErrors, isNaabu, toolId, onConfirm, customSubdomains, customIps, ipAttachTo])
 
   if (!isOpen || !toolId) return null
 
-  const domain = graphInputs?.domain || targetDomain || ''
   const inputNodeTypes = SECTION_INPUT_MAP[toolId] || []
   const outputNodeTypes = SECTION_NODE_MAP[toolId] || []
+  const hasNoGraphTargets = isNaabu && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0
+  const hasNoCustomTargets = !customSubdomains.trim() && !customIps.trim()
 
   return (
     <Modal
@@ -76,9 +227,7 @@ export function PartialReconModal({
         <div style={{ display: 'flex', alignItems: 'stretch', gap: '12px' }}>
           {/* Input */}
           <div style={{
-            flex: 1,
-            padding: '12px 14px',
-            borderRadius: '8px',
+            flex: 1, padding: '12px 14px', borderRadius: '8px',
             backgroundColor: 'var(--bg-secondary, #1e293b)',
             border: '1px solid var(--border-color, #334155)',
           }}>
@@ -87,10 +236,7 @@ export function PartialReconModal({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' }}>
               {inputNodeTypes.map(nt => (
-                <span key={nt} style={{
-                  fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                  backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontWeight: 600,
-                }}>{nt}</span>
+                <span key={nt} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontWeight: 600 }}>{nt}</span>
               ))}
               <span style={{
                 fontSize: '9px', padding: '1px 5px', borderRadius: '3px',
@@ -101,7 +247,9 @@ export function PartialReconModal({
               </span>
             </div>
             <div style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text-primary, #e2e8f0)' }}>
-              {loadingInputs ? 'Loading...' : domain || 'No domain configured'}
+              {loadingInputs ? 'Loading...' : isNaabu
+                ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs, ${graphInputs?.existing_subdomains_count ?? 0} subdomains)`
+                : domain || 'No domain configured'}
             </div>
           </div>
 
@@ -112,9 +260,7 @@ export function PartialReconModal({
 
           {/* Output */}
           <div style={{
-            flex: 1,
-            padding: '12px 14px',
-            borderRadius: '8px',
+            flex: 1, padding: '12px 14px', borderRadius: '8px',
             backgroundColor: 'var(--bg-secondary, #1e293b)',
             border: '1px solid var(--border-color, #334155)',
           }}>
@@ -123,10 +269,7 @@ export function PartialReconModal({
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {outputNodeTypes.map(nt => (
-                <span key={nt} style={{
-                  fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                  backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', fontWeight: 600,
-                }}>{nt}</span>
+                <span key={nt} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', fontWeight: 600 }}>{nt}</span>
               ))}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '6px' }}>
@@ -137,21 +280,102 @@ export function PartialReconModal({
 
         {/* Tools info */}
         <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', lineHeight: '1.6' }}>
-          Discovers subdomains using 5 tools in parallel (crt.sh, HackerTarget, Subfinder, Amass, Knockpy),
-          filters wildcards with Puredns, then resolves full DNS records (A, AAAA, MX, NS, TXT, SOA, CNAME) for each.
-          Results are merged into the existing graph -- duplicates are updated, not recreated.
+          {TOOL_DESCRIPTIONS[toolId] || 'Runs this pipeline phase independently and merges results into the existing graph.'}
         </div>
 
-        {/* Subdomain prefix warning */}
-        {subdomainPrefixes.length > 0 && (
+        {/* Naabu: no targets warning */}
+        {hasNoGraphTargets && hasNoCustomTargets && (
           <div style={{
-            fontSize: '11px',
-            color: '#f87171',
-            lineHeight: '1.5',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            backgroundColor: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
+            fontSize: '11px', color: '#facc15', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(234, 179, 8, 0.08)', border: '1px solid rgba(234, 179, 8, 0.2)',
+          }}>
+            No IPs found in graph. Run Subdomain Discovery first to populate the graph, or provide custom targets below.
+          </div>
+        )}
+
+        {/* === Naabu: Section A - Custom Subdomains === */}
+        {isNaabu && (
+          <div>
+            <div style={labelStyle}>Custom subdomains (optional, one per line)</div>
+            <textarea
+              value={customSubdomains}
+              onChange={e => setCustomSubdomains(e.target.value)}
+              placeholder={`api.${domain || 'example.com'}\nstaging.${domain || 'example.com'}`}
+              rows={2}
+              style={textareaStyle(subdomainValidation.errors.length > 0)}
+            />
+            {subdomainValidation.errors.length > 0 ? (
+              <div style={errorListStyle}>
+                {subdomainValidation.errors.map((err, i) => (
+                  <div key={i} style={errorLineStyle}>Line {err.line}: {err.error}</div>
+                ))}
+              </div>
+            ) : (
+              <div style={hintStyle}>Will be DNS-resolved and added to the graph as Subdomain nodes</div>
+            )}
+          </div>
+        )}
+
+        {/* === Naabu: Section B - Custom IPs === */}
+        {isNaabu && (
+          <div>
+            <div style={labelStyle}>Custom IPs (optional, one per line)</div>
+            <textarea
+              value={customIps}
+              onChange={e => setCustomIps(e.target.value)}
+              placeholder={'192.168.1.1\n10.0.0.0/24'}
+              rows={2}
+              style={textareaStyle(ipValidation.errors.length > 0)}
+            />
+            {ipValidation.errors.length > 0 ? (
+              <div style={errorListStyle}>
+                {ipValidation.errors.map((err, i) => (
+                  <div key={i} style={errorLineStyle}>Line {err.line}: {err.error}</div>
+                ))}
+              </div>
+            ) : (
+              <div style={hintStyle}>IPv4, IPv6, or CIDR ranges (/24-/32)</div>
+            )}
+
+            {/* Dropdown: associate IPs to subdomain */}
+            {customIps.trim() && ipValidation.errors.length === 0 && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={labelStyle}>Associate IPs to</div>
+                <select
+                  value={ipAttachTo || ''}
+                  onChange={e => setIpAttachTo(e.target.value || null)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, #334155)',
+                    backgroundColor: 'var(--bg-secondary, #1e293b)',
+                    color: 'var(--text-primary, #e2e8f0)',
+                    fontSize: '12px',
+                  }}
+                >
+                  <option value="">-- Generic (UserInput) --</option>
+                  {attachToOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}{opt.source === 'custom' ? ' (new)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <div style={hintStyle}>
+                  {ipAttachTo
+                    ? `IPs will be linked to ${ipAttachTo} via RESOLVES_TO`
+                    : 'IPs will be tracked via a UserInput node (no subdomain link)'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Subdomain prefix warning (SubdomainDiscovery only) */}
+        {toolId === 'SubdomainDiscovery' && subdomainPrefixes.length > 0 && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
           }}>
             This project has subdomain prefixes locked to <strong>{subdomainPrefixes.join(', ')}</strong>.
             Partial recon ignores this filter and runs full discovery to find all subdomains.
@@ -166,8 +390,7 @@ export function PartialReconModal({
             onClick={onClose}
             disabled={isStarting}
             style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
+              padding: '8px 16px', borderRadius: '6px',
               border: '1px solid var(--border-color, #334155)',
               backgroundColor: 'transparent',
               color: 'var(--text-primary, #e2e8f0)',
@@ -182,19 +405,14 @@ export function PartialReconModal({
           <button
             type="button"
             onClick={handleRun}
-            disabled={!domain || isStarting}
+            disabled={!domain || isStarting || hasValidationErrors}
             style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: '#3b82f6',
-              color: '#fff',
-              cursor: !domain || isStarting ? 'not-allowed' : 'pointer',
+              padding: '8px 16px', borderRadius: '6px', border: 'none',
+              backgroundColor: '#3b82f6', color: '#fff',
+              cursor: !domain || isStarting || hasValidationErrors ? 'not-allowed' : 'pointer',
               fontSize: '13px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              opacity: !domain || isStarting ? 0.5 : 1,
+              display: 'flex', alignItems: 'center', gap: '6px',
+              opacity: !domain || isStarting || hasValidationErrors ? 0.5 : 1,
             }}
           >
             {isStarting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}

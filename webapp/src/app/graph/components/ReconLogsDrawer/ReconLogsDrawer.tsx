@@ -21,6 +21,7 @@ interface ReconLogsDrawerProps {
   phases?: readonly string[]
   totalPhases?: number
   errorMessage?: string | null
+  hidePhaseProgress?: boolean
 }
 
 export function ReconLogsDrawer({
@@ -38,6 +39,7 @@ export function ReconLogsDrawer({
   phases = RECON_PHASES,
   totalPhases = 7,
   errorMessage,
+  hidePhaseProgress = false,
 }: ReconLogsDrawerProps) {
   const logsEndRef = useRef<HTMLDivElement>(null)
   const logsContainerRef = useRef<HTMLDivElement>(null)
@@ -81,13 +83,15 @@ export function ReconLogsDrawer({
       case 'starting':
         return 'Starting...'
       case 'running':
-        return currentPhase
-          ? `Phase ${currentPhaseNumber}/${totalPhases}: ${currentPhase}`
-          : 'Running...'
+        if (!currentPhase) return 'Running...'
+        return hidePhaseProgress
+          ? `Scanning: ${currentPhase}`
+          : `Phase ${currentPhaseNumber}/${totalPhases}: ${currentPhase}`
       case 'paused':
-        return currentPhase
-          ? `Paused — Phase ${currentPhaseNumber}/${totalPhases}: ${currentPhase}`
-          : 'Paused'
+        if (!currentPhase) return 'Paused'
+        return hidePhaseProgress
+          ? `Paused: ${currentPhase}`
+          : `Paused — Phase ${currentPhaseNumber}/${totalPhases}: ${currentPhase}`
       case 'completed':
         return 'Completed'
       case 'error':
@@ -206,25 +210,27 @@ export function ReconLogsDrawer({
         </div>
       </div>
 
-      {/* Phase progress */}
-      <div className={styles.phaseProgress}>
-        {phases.map((phase, index) => {
-          const phaseNum = index + 1
-          const isActive = currentPhaseNumber === phaseNum
-          const isCompleted = currentPhaseNumber !== null && phaseNum < currentPhaseNumber
-          const isPending = currentPhaseNumber === null || phaseNum > currentPhaseNumber
+      {/* Phase progress (hidden for single-phase partial recon) */}
+      {!hidePhaseProgress && (
+        <div className={styles.phaseProgress}>
+          {phases.map((phase, index) => {
+            const phaseNum = index + 1
+            const isActive = currentPhaseNumber === phaseNum
+            const isCompleted = currentPhaseNumber !== null && phaseNum < currentPhaseNumber
+            const isPending = currentPhaseNumber === null || phaseNum > currentPhaseNumber
 
-          return (
-            <div
-              key={phase}
-              className={`${styles.phaseItem} ${isActive ? styles.phaseActive : ''} ${isCompleted ? styles.phaseCompleted : ''} ${isPending ? styles.phasePending : ''}`}
-              title={phase}
-            >
-              <span className={styles.phaseNumber}>{phaseNum}</span>
-            </div>
-          )
-        })}
-      </div>
+            return (
+              <div
+                key={phase}
+                className={`${styles.phaseItem} ${isActive ? styles.phaseActive : ''} ${isCompleted ? styles.phaseCompleted : ''} ${isPending ? styles.phasePending : ''}`}
+                title={phase}
+              >
+                <span className={styles.phaseNumber}>{phaseNum}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Logs container */}
       <div

@@ -140,21 +140,34 @@ export interface PartialReconState {
 export interface GraphInputs {
   domain: string | null
   existing_subdomains_count: number
+  existing_subdomains?: string[]
+  existing_ips_count?: number
   source: 'graph' | 'settings'
+}
+
+export interface UserTargets {
+  subdomains: string[]
+  ips: string[]
+  ip_attach_to: string | null
 }
 
 export interface PartialReconParams {
   tool_id: string
   graph_inputs: Record<string, string>
   user_inputs: string[]
+  user_targets?: UserTargets
   dedup_enabled: boolean
   settings_overrides?: Record<string, unknown>
 }
 
-export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery'])
+export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery', 'Naabu'])
 
-export const PARTIAL_RECON_PHASES = [
-  'Subdomain Discovery',
-] as const
+export const PARTIAL_RECON_PHASE_MAP: Record<string, readonly string[]> = {
+  SubdomainDiscovery: ['Subdomain Discovery'],
+  Naabu: ['Port Scanning'],
+}
+
+// Backward-compatible default (SubdomainDiscovery phases)
+export const PARTIAL_RECON_PHASES = PARTIAL_RECON_PHASE_MAP['SubdomainDiscovery']
 
 export type PartialReconPhase = typeof PARTIAL_RECON_PHASES[number]

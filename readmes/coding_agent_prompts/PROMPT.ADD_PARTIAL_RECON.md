@@ -2,7 +2,7 @@
 
 Extend the partial recon system to support a new tool/section from the recon pipeline. Partial recon lets users run a single pipeline phase on demand from the workflow graph, without running the full pipeline. Results are merged into the existing Neo4j graph (always deduplicated via MERGE).
 
-> **Reference implementation**: SubdomainDiscovery is fully implemented as the first partial recon tool. Study it as the pattern to follow for every new tool.
+> **Reference implementations**: SubdomainDiscovery and Naabu are fully implemented. **Study Naabu as the primary pattern** -- it demonstrates user inputs, graph querying, structured targets, and the full data flow.
 
 ---
 
@@ -13,7 +13,12 @@ Extend the partial recon system to support a new tool/section from the recon pip
 - **Container-based execution.** Partial recon runs inside the same `redamon-recon` Docker image as the full pipeline, with a different command (`python /app/recon/partial_recon.py`). The orchestrator manages the container lifecycle.
 - **Settings come from `get_settings()`.** The recon container fetches project settings via the webapp API (camelCase to UPPER_SNAKE_CASE conversion). Never pass raw camelCase settings.
 - **Input node types come from `nodeMapping.ts`.** This is the single source of truth for what each tool consumes and produces. The modal reads from this mapping.
-- **User inputs require validation.** If the tool accepts user-provided values (e.g., custom IPs for port scanning), validate format on both frontend and backend. Create a `UserInput` node in Neo4j to track provenance.
+- **Each input type gets its own textarea + validation.** Never mix input types in a single textarea. Each has its own validator, error display, and graph association logic.
+- **Validate on BOTH frontend and backend.** Frontend validates inline (regex, domain ownership, CIDR range) and disables Run on errors. Backend re-validates and skips invalid entries with log messages.
+- **User input graph strategy -- choose by type:**
+  - **Subdomain** -> always attaches to the project's Domain (only one domain per project). Create real Subdomain + IP + RESOLVES_TO nodes directly. No UserInput.
+  - **Any other node type** (IP, URL, etc.) -> user must choose which existing node to attach to via a dropdown, OR select "Generic (UserInput)" for orphan provenance.
+  - If attachment target doesn't exist at scan time, fall back to UserInput automatically.
 - **Mutual exclusion.** Only one partial recon OR full recon can run at a time per project. The orchestrator enforces this (409 Conflict).
 - **Rebuild the recon image** after changing `recon/partial_recon.py`: `docker compose --profile tools build recon`
 
@@ -23,16 +28,96 @@ Extend the partial recon system to support a new tool/section from the recon pip
 
 ```
 User clicks Play on tool node (ProjectForm) 
-  -> PartialReconModal opens (config-only: shows input/output node types, optional user inputs)
-  -> User clicks "Run"
-  -> Frontend POST /api/recon/{projectId}/partial
+  -> PartialReconModal opens (shows input/output nodes, per-type input textareas)
+  -> Frontend validates each textarea independently (IP format, CIDR range, subdomain domain ownership)
+  -> For non-subdomain inputs: user selects attachment node from dropdown (or "Generic")
+  -> User clicks "Run" (disabled if any validation errors)
+  -> Frontend POST /api/recon/{projectId}/partial  { user_targets: {subdomains, ips, ip_attach_to} }
   -> Proxied to orchestrator POST /recon/{project_id}/partial  
   -> Orchestrator writes config JSON to /tmp/redamon/, spawns recon container
   -> Container runs: python /app/recon/partial_recon.py
-  -> partial_recon.py reads config, calls get_settings(), imports & runs the tool function
+  -> partial_recon.py reads config, processes user_targets, calls tool function
   -> Updates Neo4j graph via mixin methods
   -> Orchestrator streams logs via SSE
-  -> Graph page shows drawer with real-time logs (same as full pipeline)
+  -> Graph page shows drawer with real-time logs (no phase progress bar for partial recon)
+```
+
+### End-to-End Data Flow (verified for Naabu)
+
+```
+1. Modal builds: { tool_id, graph_inputs, user_inputs:[], user_targets: {subdomains, ips, ip_attach_to}, dedup_enabled }
+2. ProjectForm.handlePartialReconConfirm: JSON.stringify(params) -> POST /api/recon/{projectId}/partial
+   [passes full params as-is]
+3. Proxy route (partial/route.ts): destructures body, adds project metadata, forwards to orchestrator
+   [must include user_targets: body.user_targets || null]
+4. Orchestrator model (models.py): PartialReconStartRequest validates via Pydantic
+   [user_targets: dict | None = None]
+5. Orchestrator API (api.py): builds config dict, includes "user_targets": request.user_targets
+6. Container manager: json.dump(config) -> /tmp/redamon/partial_{project_id}.json
+7. Container: load_config() reads JSON, run_naabu(config) reads config["user_targets"]
+8. Processing: subdomains resolved FIRST, then IPs injected (order matters for cross-references)
+```
+
+---
+
+## Modal Input Design Pattern
+
+**Each input type the tool accepts gets its own section in the modal.** This is the core UI pattern:
+
+### Rule: Subdomains always auto-attach to Domain
+Since there is only one Domain per project, subdomains always belong to it. No dropdown needed -- just validate that the subdomain ends with `.{projectDomain}`.
+
+### Rule: All other input types need a "Associate to" dropdown
+IPs, URLs, or any other user values need explicit association. The dropdown offers:
+- `"-- Generic (UserInput) --"` (default) -- creates a UserInput node
+- Existing nodes from the graph (fetched via graph-inputs API)
+- Custom nodes from other textareas in the same modal (live-updated)
+
+### Naabu Example (implemented reference)
+
+```
++------------------------------------------+
+| Custom subdomains (optional)             |
+| +--------------------------------------+ |
+| | api.example.com                      | |
+| | staging.example.com                  | |
+| +--------------------------------------+ |
+| Will be DNS-resolved and added to graph  |
+|                                          |
+| Custom IPs (optional)                    |
+| +--------------------------------------+ |
+| | 10.0.0.1                             | |
+| | 10.0.0.2                             | |
+| | 192.168.1.0/24                       | |
+| +--------------------------------------+ |
+| Associate to: [v -- Generic (UserInput)] |
+|               -- Generic (UserInput) --  |
+|               www.example.com    (graph) |
+|               api.example.com      (new) |
++------------------------------------------+
+```
+
+**State:**
+```typescript
+const [customSubdomains, setCustomSubdomains] = useState('')
+const [customIps, setCustomIps] = useState('')
+const [ipAttachTo, setIpAttachTo] = useState<string | null>(null)
+```
+
+**Dropdown options built from (via `useMemo`):**
+1. `graphInputs.existing_subdomains` (fetched from graph-inputs API)
+2. Valid custom subdomains from Section A textarea (live-parsed)
+3. `"-- Generic (UserInput) --"` option (value: `null`)
+
+**The dropdown only appears when IPs textarea has content and no validation errors.**
+
+**On "Run":**
+```typescript
+const userTargets: UserTargets = {
+  subdomains: customSubdomains.split('\n').map(s => s.trim()).filter(Boolean),
+  ips: customIps.split('\n').map(s => s.trim()).filter(Boolean),
+  ip_attach_to: ipAttachTo,
+}
 ```
 
 ---
@@ -41,136 +126,128 @@ User clicks Play on tool node (ProjectForm)
 
 ### 1. Backend: `recon/partial_recon.py`
 
-Add a new `run_<tool_name>(config)` function following this pattern:
+Add a `run_<tool_name>(config)` function. It reads `config["user_targets"]` for structured input:
 
 ```python
-def run_<tool_name>(config: dict) -> None:
-    from recon.<module> import <tool_function>
-    from recon.project_settings import get_settings
+user_targets = config.get("user_targets") or {}
+user_subdomains = user_targets.get("subdomains", [])
+user_ips = user_targets.get("ips", [])
+ip_attach_to = user_targets.get("ip_attach_to")  # subdomain name or None
 
-    # Read config
-    user_inputs = config.get("user_inputs", [])
-    dedup_enabled = config.get("dedup_enabled", True)
-    user_id = os.environ.get("USER_ID", "")
-    project_id = os.environ.get("PROJECT_ID", "")
-    settings = get_settings()
-
-    # If tool accepts user inputs, create UserInput node
-    user_input_id = None
-    if user_inputs:
-        # Validate inputs, create UserInput node (see SubdomainDiscovery pattern)
-        ...
-
-    # Build the input data structure the tool function expects
-    # CRITICAL: Query Neo4j graph to get the input nodes this tool needs
-    # (e.g., port scanning needs IPs from the graph, HTTP probing needs subdomains + ports)
-    recon_data = _build_input_from_graph(tool_id, user_id, project_id, settings, user_inputs)
-
-    # Call the exact same function the full pipeline uses
-    result = <tool_function>(recon_data=recon_data, settings=settings)
-
-    # Update the graph
-    graph_client.update_graph_from_<stage>(result, user_id, project_id)
+# Fall back to legacy flat user_inputs for backward compat
+if not user_targets and config.get("user_inputs"):
+    # classify each entry with _is_ip_or_cidr() / _is_valid_hostname()
 ```
+
+**Processing order matters:**
+1. **Subdomains FIRST** -- resolve via `_resolve_hostname()`, create Subdomain + IP + RESOLVES_TO in graph, inject into `recon_data`
+2. **IPs SECOND** -- this ensures subdomain exists if `ip_attach_to` references a custom subdomain from step 1
+
+**IP attachment logic:**
+- `ip_attach_to` is a subdomain name: inject IPs into `recon_data["dns"]["subdomains"][ip_attach_to]["ips"]`, then post-scan create `Subdomain -[:RESOLVES_TO]-> IP`
+- `ip_attach_to` is `null`: inject IPs into `recon_data["dns"]["domain"]["ips"]`, create UserInput node, post-scan link `UserInput -[:PRODUCED]-> IP`
+- **Safety fallback**: if `ip_attach_to` subdomain doesn't exist in graph after resolution, automatically fall back to UserInput (prevents orphan IPs)
 
 **Register in `main()`:**
 ```python
-def main():
-    config = load_config()
-    tool_id = config.get("tool_id", "")
-    if tool_id == "SubdomainDiscovery":
-        run_subdomain_discovery(config)
-    elif tool_id == "<NewToolId>":
-        run_<tool_name>(config)
-    else:
-        print(f"[!][Partial] Unknown tool_id: {tool_id}")
-        sys.exit(1)
+elif tool_id == "<NewToolId>":
+    run_<tool_name>(config)
 ```
 
-**Key difference from SubdomainDiscovery:** Most tools (port scan, HTTP probe, resource enum, vuln scan) need INPUT DATA from the existing graph. SubdomainDiscovery only needs the domain name. Other tools need to query Neo4j first to build a `recon_data` dict that the tool function expects. For example:
-- **Port scanning (Naabu)**: needs list of IPs and subdomains from graph
-- **HTTP probing (Httpx)**: needs subdomains + open ports from graph
-- **Resource enumeration (Katana)**: needs live BaseURLs from graph
-- **Vulnerability scanning (Nuclei)**: needs BaseURLs + endpoints from graph
-
-You must query Neo4j to assemble this input, then call the tool function with the same dict structure `main.py` would pass.
-
-### 2. Backend: Graph Mixin (if needed)
+### 2. Backend: Graph Mixin
 
 File: `graph_db/mixins/recon_mixin.py`
 
-Most tools already have an `update_graph_from_<stage>()` method that handles MERGE + dedup. You can reuse them directly. Only add a new `update_graph_from_partial_<tool>()` method if:
-- You need to track `user_input_id` via PRODUCED relationships
-- You need different stats tracking (new vs existing counts)
+Reuse existing `update_graph_from_<stage>()` methods. Add a case to `get_graph_inputs_for_tool()` that returns counts AND node name lists (for the dropdown).
 
-**Existing graph update methods you can reuse as-is:**
-- `update_graph_from_domain_discovery()` -- Domain, Subdomain, IP, DNSRecord
-- `update_graph_from_port_scan()` -- Port, Service
-- `update_graph_from_nmap()` -- Port, Service, Technology
-- `update_graph_from_http_probe()` -- BaseURL, Certificate, Technology, Header
-- `update_graph_from_resource_enum()` -- Endpoint, Parameter
-- `update_graph_from_vuln_scan()` -- Vulnerability, CVE, Exploit, MitreData, Capec
-- `update_graph_from_js_recon()` -- JsReconFinding, Secret, Endpoint
-
-### 3. Backend: Graph Input Query
-
-File: `graph_db/mixins/recon_mixin.py` -- method `get_graph_inputs_for_tool()`
-
-Add a new case for the tool_id that queries the right nodes. Example for Naabu:
+**Naabu example** -- returns subdomain names for the "Associate to" dropdown:
 ```python
-if tool_id == "Naabu":
+elif tool_id == "Naabu":
     result = session.run("""
-        MATCH (s:Subdomain {user_id: $uid, project_id: $pid})-[:RESOLVES_TO]->(i:IP)
-        RETURN collect(DISTINCT i.address) AS ips, collect(DISTINCT s.name) AS subdomains
+        OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+        OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
+        OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
+        WITH d, collect(DISTINCT s.name) AS subdomains,
+             count(DISTINCT i) + count(DISTINCT di) AS ipCount
+        RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount
     """, uid=user_id, pid=project_id)
-    record = result.single()
-    return {
-        "ips": record["ips"],
-        "subdomains": record["subdomains"],
-        "source": "graph",
-    }
 ```
 
-Also update the webapp graph-inputs API route (`webapp/src/app/api/recon/[projectId]/graph-inputs/[toolId]/route.ts`) if the new tool needs a different Neo4j query or different fallback behavior.
+### 3. Frontend: Types (`recon-types.ts`)
 
-### 4. Frontend: Enable the Play Button
-
-File: `webapp/src/lib/recon-types.ts`
-
-Add the tool_id to the supported set:
 ```typescript
-export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery', '<NewToolId>'])
+// Add to PARTIAL_RECON_SUPPORTED_TOOLS
+export const PARTIAL_RECON_SUPPORTED_TOOLS = new Set(['SubdomainDiscovery', 'Naabu', '<NewToolId>'])
+
+// Add to PARTIAL_RECON_PHASE_MAP (NOT the flat PARTIAL_RECON_PHASES)
+export const PARTIAL_RECON_PHASE_MAP: Record<string, readonly string[]> = {
+  SubdomainDiscovery: ['Subdomain Discovery'],
+  Naabu: ['Port Scanning'],
+  '<NewToolId>': ['<Phase Name>'],
+}
+
+// Extend GraphInputs if needed (add existing_<type> list for dropdown)
+export interface GraphInputs {
+  domain: string | null
+  existing_subdomains_count: number
+  existing_subdomains?: string[]     // for Naabu dropdown
+  existing_ips_count?: number
+  existing_baseurls?: string[]       // for future tools
+  source: 'graph' | 'settings'
+}
+
+// UserTargets carries structured inputs (per-type)
+export interface UserTargets {
+  subdomains: string[]
+  ips: string[]
+  ip_attach_to: string | null
+  // Future tools may add: urls: string[], url_attach_to: string | null, etc.
+}
 ```
 
-That's it -- the play button on `ToolNode.tsx` already checks this set. The `PartialReconModal` already reads input/output node types from `nodeMapping.ts`.
+### 4. Frontend: Graph Inputs API Route
 
-### 5. Frontend: PartialReconModal Input Handling (if tool accepts user inputs)
+File: `webapp/src/app/api/recon/[projectId]/graph-inputs/[toolId]/route.ts`
+
+Add `else if (toolId === '<NewToolId>')` -- return node name lists for dropdown alongside counts. Must use `else if`, not `if`.
+
+### 5. Frontend: PartialReconModal
 
 File: `webapp/src/components/projects/ProjectForm/WorkflowView/PartialReconModal.tsx`
 
-Currently the modal is generic: shows input/output node types from `nodeMapping.ts`, domain from graph, and a Run button. If the new tool needs user-provided values (e.g., custom IPs for port scanning, custom URLs for HTTP probing):
+For each new tool:
+1. Add tool description to `TOOL_DESCRIPTIONS`
+2. Add per-type input sections (conditional on `toolId`):
+   - **Subdomain textarea**: validates hostname regex + domain ownership. No dropdown needed.
+   - **IP textarea** (or URL, etc.): validates format. Show "Associate to" dropdown below with graph nodes + custom subdomains + "Generic".
+3. Each textarea has its own `useMemo` validator. `hasValidationErrors` is OR of all.
+4. `handleRun` builds `UserTargets` from all textarea states.
+5. Show warning if graph has no data for this tool.
 
-1. Detect the `toolId` and conditionally render an input section
-2. Validate input format on the frontend (regex for IPs, URLs, etc.)
-3. Pass values via `user_inputs` array in `PartialReconParams`
-4. The backend creates a `UserInput` node with `input_type` set appropriately ("ips", "urls", etc.)
+**Validation helpers already exist:**
+- `validateIp(value)` -- IPv4 octets, IPv6, CIDR /24-/32
+- `validateSubdomain(value, projectDomain)` -- hostname regex + domain ownership
+- `validateLines(text, validator)` -- runs validator per line, returns `{errors, validCount}`
 
-**Validation examples by input type:**
-- IPs: `/^(\d{1,3}\.){3}\d{1,3}$/` or CIDR
-- URLs: must start with `http://` or `https://`
-- Domains: `/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/`
+### 6. Frontend: Proxy Route
 
-### 6. Frontend: Update Drawer Title
+File: `webapp/src/app/api/recon/[projectId]/partial/route.ts`
 
-File: `webapp/src/app/graph/page.tsx`
+Already passes `user_targets: body.user_targets || null`. No changes needed for new tools.
 
-The `ReconLogsDrawer` title currently says "Partial Recon: Subdomain Discovery". When adding new tools, make the title dynamic based on the running tool_id. The `partialReconState.tool_id` field contains the tool name.
+### 7. Backend: Orchestrator
 
-### 7. Frontend: Update Toolbar Badge
+Files: `recon_orchestrator/models.py` + `recon_orchestrator/api.py`
 
-File: `webapp/src/app/graph/components/GraphToolbar/GraphToolbar.tsx`
+Already has `user_targets: dict | None = None` in model and passes it to config. No changes needed.
 
-The toolbar badge currently says "Partial: Subdomain Discovery". Make it dynamic using the tool_id from the partial recon state.
+### 8. Frontend: Drawer & Toolbar (already generic)
+
+No changes needed:
+- Drawer title uses `WORKFLOW_TOOLS.find()` lookup
+- Toolbar badge uses `WORKFLOW_TOOLS.find()` lookup  
+- Phase progress hidden for partial recon via `hidePhaseProgress`
+- Status shows `"Scanning: <phase>"` instead of `"Phase 1/1: <phase>"`
 
 ---
 
@@ -180,106 +257,163 @@ The toolbar badge currently says "Partial: Subdomain Discovery". Make it dynamic
 
 | File | What to change |
 |------|----------------|
-| `recon/partial_recon.py` | Add `run_<tool>(config)` function + register in `main()` |
-| `webapp/src/lib/recon-types.ts` | Add tool_id to `PARTIAL_RECON_SUPPORTED_TOOLS` |
+| `recon/partial_recon.py` | Add `run_<tool>(config)` + register in `main()` |
+| `webapp/src/lib/recon-types.ts` | Add to `PARTIAL_RECON_SUPPORTED_TOOLS` + `PARTIAL_RECON_PHASE_MAP`, extend `UserTargets` if needed |
+| `webapp/src/components/.../PartialReconModal.tsx` | Add per-type textareas + validation + dropdown for the tool |
 
 ### Files you MAY need to modify:
 
 | File | When |
 |------|------|
-| `graph_db/mixins/recon_mixin.py` | If you need a custom `update_graph_from_partial_<tool>()` or new graph input query |
-| `webapp/src/app/api/recon/[projectId]/graph-inputs/[toolId]/route.ts` | If the tool needs a different Neo4j query for graph inputs |
-| `webapp/src/components/.../PartialReconModal.tsx` | If the tool accepts user-provided input values |
-| `webapp/src/app/graph/page.tsx` | To make drawer title dynamic (one-time change for all tools) |
-| `webapp/src/app/graph/components/GraphToolbar/GraphToolbar.tsx` | To make badge text dynamic (one-time change for all tools) |
+| `graph_db/mixins/recon_mixin.py` | Add `get_graph_inputs_for_tool()` case with node name lists |
+| `webapp/src/app/api/recon/[projectId]/graph-inputs/[toolId]/route.ts` | Add tool-specific Neo4j query for counts + names |
+| `webapp/src/lib/recon-types.ts` | Extend `GraphInputs` / `UserTargets` if tool has new input types |
+| `recon/tests/test_partial_recon.py` | Add test class for new tool |
+| `webapp/src/lib/partial-recon-types.test.ts` | Update supported tools, phase map, type shape tests |
 
 ### Files you should NOT modify:
 
 | File | Why |
 |------|-----|
-| `recon/domain_recon.py`, `port_scan.py`, `http_probe.py`, etc. | These are the source pipeline modules. Import, don't modify. |
-| `recon/main.py` | The full pipeline. Partial recon is independent. |
-| `recon_orchestrator/api.py` | Endpoints are generic (tool_id-agnostic). Already handles any tool. |
-| `recon_orchestrator/container_manager.py` | Container management is generic. Already handles any tool. |
-| `webapp/src/hooks/usePartialReconStatus.ts` | Generic hook, works for any tool_id. |
-| `webapp/src/hooks/usePartialReconSSE.ts` | Generic hook, works for any tool_id. |
-| `webapp/src/components/.../ToolNode.tsx` | Play button is already generic (checks `PARTIAL_RECON_SUPPORTED_TOOLS`). |
-| `webapp/src/components/.../WorkflowView.tsx` | Already passes `onRunPartial` callback. |
-| `webapp/src/components/.../ProjectForm.tsx` | Already handles partial recon confirm flow. |
+| `recon/domain_recon.py`, `port_scan.py`, `http_probe.py`, etc. | Source pipeline modules. Import, don't modify. |
+| `recon/main.py` | Full pipeline. Partial recon is independent. |
+| `recon_orchestrator/api.py` | Already passes `user_targets` generically. |
+| `recon_orchestrator/models.py` | Already has `user_targets: dict \| None`. |
+| `recon_orchestrator/container_manager.py` | Generic. Writes whatever config it receives. |
+| `webapp/src/app/api/recon/[projectId]/partial/route.ts` | Already passes `user_targets`. |
+| `webapp/src/hooks/usePartialRecon*.ts` | Generic hooks. |
+| `webapp/src/components/.../ToolNode.tsx` | Checks `PARTIAL_RECON_SUPPORTED_TOOLS`. |
+| `webapp/src/components/.../WorkflowView.tsx`, `ProjectForm.tsx` | Already generic. |
+| `webapp/src/app/graph/page.tsx` | Uses `PARTIAL_RECON_PHASE_MAP`. |
+| `webapp/src/app/graph/components/GraphToolbar/GraphToolbar.tsx` | Uses `WORKFLOW_TOOLS.find()`. |
+| `webapp/src/app/graph/components/ReconLogsDrawer/ReconLogsDrawer.tsx` | Has `hidePhaseProgress`. |
 
-### Key reference files (read-only, for understanding):
+### Key reference files (read-only):
 
 | File | Contains |
 |------|----------|
-| `webapp/src/components/projects/ProjectForm/nodeMapping.ts` | `SECTION_INPUT_MAP` and `SECTION_NODE_MAP` -- single source of truth for tool I/O node types |
-| `webapp/src/components/projects/ProjectForm/WorkflowView/workflowDefinition.ts` | `WORKFLOW_TOOLS` array -- all tool IDs, labels, groups, enabled fields |
-| `graph_db/schema.py` | Neo4j constraints and indexes -- shows uniqueness rules for each node type |
-| `recon/project_settings.py` | `get_settings()` + `DEFAULT_SETTINGS` -- how settings are loaded |
-| `recon/main.py` | Full pipeline flow -- shows how each tool function is called and what `recon_data` structure it expects |
+| `webapp/src/components/projects/ProjectForm/nodeMapping.ts` | `SECTION_INPUT_MAP` and `SECTION_NODE_MAP` -- tool I/O node types |
+| `webapp/src/components/projects/ProjectForm/WorkflowView/workflowDefinition.ts` | `WORKFLOW_TOOLS` -- tool IDs, labels, groups |
+| `graph_db/schema.py` | Neo4j constraints and indexes |
+| `recon/project_settings.py` | `get_settings()` + `DEFAULT_SETTINGS` |
+| `recon/main.py` | Full pipeline -- see what `recon_data` structure each tool expects |
 
 ---
 
-## Tool-Specific Implementation Notes
+## Naabu Reference Implementation (study this)
 
-### Port Scanning (Naabu, Masscan)
-- **Input from graph**: IPs and Subdomains (query RESOLVES_TO relationships)
+Naabu is the reference for any tool that needs user inputs. Read these files in order:
+
+### 1. Frontend: Modal inputs
+**`PartialReconModal.tsx`** -- search for `isNaabu`:
+- Section A: `customSubdomains` textarea with `validateSubdomain()` per line
+- Section B: `customIps` textarea with `validateIp()` per line
+- Dropdown: `ipAttachTo` select, options from `attachToOptions` (graph + custom, via `useMemo`)
+- `handleRun` builds `UserTargets` only when there's actual custom input
+
+### 2. Frontend: Graph inputs API  
+**`graph-inputs/[toolId]/route.ts`** -- Naabu case:
+- Cypher query returns `collect(DISTINCT s.name) AS subdomains` (name list for dropdown)
+- Returns `{ domain, existing_subdomains, existing_subdomains_count, existing_ips_count, source }`
+
+### 3. Backend: Processing
+**`partial_recon.py` -- `run_naabu()`:**
+- Reads `config["user_targets"]` with legacy `user_inputs` fallback
+- STEP 1: Resolves hostnames, creates Subdomain + IP + RESOLVES_TO in Neo4j
+- STEP 2: Injects IPs into `recon_data` (into subdomain bucket if `ip_attach_to`, or domain bucket if generic)
+- Safety: if `ip_attach_to` subdomain doesn't exist in graph, falls back to UserInput
+- Calls `run_port_scan(recon_data, settings=settings)` -- same function as full pipeline
+- Post-scan: creates `Subdomain -[:RESOLVES_TO]-> IP` or `UserInput -[:PRODUCED]-> IP` depending on `ip_attach_to`
+
+### 4. Graph relationships created
+```
+User provides subdomain:
+  Domain -[:HAS_SUBDOMAIN]-> Subdomain -[:RESOLVES_TO]-> IP -[:HAS_PORT]-> Port
+
+User provides IP attached to subdomain:
+  Subdomain -[:RESOLVES_TO]-> IP -[:HAS_PORT]-> Port
+
+User provides IP (generic):
+  Domain -[:HAS_USER_INPUT]-> UserInput -[:PRODUCED]-> IP -[:HAS_PORT]-> Port
+```
+
+---
+
+## Tool-Specific Notes
+
+### Port Scanning (Naabu) -- IMPLEMENTED
+- **Input from graph**: IPs and Subdomains (via `_build_recon_data_from_graph()`)
 - **Tool function**: `run_port_scan(recon_data, settings=settings)` from `port_scan.py`
-- **Graph update**: `update_graph_from_port_scan()` -- creates Port, Service nodes
-- **User inputs**: Could accept custom IPs (validate format: IPv4, IPv6, CIDR)
-- **Note**: Uses Docker-in-Docker (spawns naabu/masscan containers)
+- **Graph update**: `update_graph_from_port_scan()` -- Port, Service nodes
+- **User inputs**: Subdomains (auto-attach to Domain) + IPs (dropdown: attach to subdomain or generic)
+- **Note**: `run_port_scan` mutates `recon_data` adding `port_scan` key. Docker-in-Docker. SYN scan with CONNECT fallback.
 
 ### HTTP Probing (Httpx)
-- **Input from graph**: Subdomains + Ports (query HAS_PORT relationships)
+- **Input from graph**: Subdomains + Ports
 - **Tool function**: `run_http_probe(recon_data, settings=settings)` from `http_probe.py`
-- **Graph update**: `update_graph_from_http_probe()` -- creates BaseURL, Technology, Header, Certificate nodes
-- **User inputs**: Could accept custom URLs
-- **Note**: Uses Docker-in-Docker (spawns httpx container)
+- **Graph update**: `update_graph_from_http_probe()` -- BaseURL, Technology, Header, Certificate
+- **User inputs**: Subdomains (auto-attach) + URLs (dropdown: attach to subdomain or generic)
 
-### Resource Enumeration (Katana, Hakrawler, GAU, etc.)
-- **Input from graph**: BaseURLs (query HAS_BASE_URL relationships)
+### Resource Enumeration (Katana, etc.)
+- **Input from graph**: BaseURLs
 - **Tool function**: `run_resource_enum(recon_data, settings=settings)` from `resource_enum.py`
-- **Graph update**: `update_graph_from_resource_enum()` -- creates Endpoint, Parameter nodes
-- **User inputs**: Could accept custom base URLs
-- **Note**: Runs multiple sub-tools in parallel
+- **Graph update**: `update_graph_from_resource_enum()` -- Endpoint, Parameter
+- **User inputs**: URLs (dropdown: attach to BaseURL or generic)
 
 ### Vulnerability Scanning (Nuclei)
 - **Input from graph**: BaseURLs + Endpoints
 - **Tool function**: `run_vuln_scan(recon_data, settings=settings)` from `vuln_scan.py`
-- **Graph update**: `update_graph_from_vuln_scan()` -- creates Vulnerability, CVE, MitreData, Capec nodes
-- **User inputs**: Could accept custom target URLs
-- **Note**: Heavy tool, can take a long time
+- **Graph update**: `update_graph_from_vuln_scan()` -- Vulnerability, CVE, MitreData, Capec
+- **User inputs**: URLs (dropdown: attach to BaseURL or generic)
 
 ### JS Recon
 - **Input from graph**: BaseURLs + Endpoints (JS files)
 - **Tool function**: `run_js_recon(combined_result, settings)` from `js_recon.py`
-- **Graph update**: `update_graph_from_js_recon()` -- creates JsReconFinding, Secret, Endpoint nodes
+- **Graph update**: `update_graph_from_js_recon()` -- JsReconFinding, Secret, Endpoint
 
 ---
 
-## UserInput Node (for tools that accept user values)
+## UserInput Node Strategy
 
-When the user provides custom input values (IPs, URLs, subdomains), create a `UserInput` node:
+**Rule: Subdomains auto-attach to Domain. Everything else: user chooses via dropdown.**
 
-```python
-graph_client.create_user_input_node(
-    domain=domain,
-    user_input_data={
-        "id": str(uuid.uuid4()),
-        "input_type": "ips",  # or "urls", "subdomains", "domains"
-        "values": user_inputs,
-        "tool_id": "<ToolId>",
-        "dedup_enabled": True,
-    },
-    user_id=user_id,
-    project_id=project_id,
-)
-```
+| User provides | Attachment | Strategy |
+|---|---|---|
+| Subdomain | Auto -> Domain (only one per project) | Create Subdomain + IP + RESOLVES_TO. No UserInput. |
+| IP attached to subdomain | User selects subdomain | Create `Subdomain -[:RESOLVES_TO]-> IP`. No UserInput. |
+| IP generic | User selects "Generic" | `UserInput -[:PRODUCED]-> IP` |
+| URL attached to BaseURL | User selects BaseURL | Create Endpoint under BaseURL. No UserInput. |
+| URL generic | User selects "Generic" | `UserInput -[:PRODUCED]-> Endpoint` |
 
-The `UserInput` node is connected to the Domain via `HAS_USER_INPUT` and to produced output nodes via `PRODUCED` relationships. This provides audit trail for user-provided data.
+**Safety fallback**: if the selected attachment node doesn't exist at scan time (deleted between modal open and run), the backend detects this via a graph query and automatically falls back to UserInput. No orphan nodes.
 
-**Schema** (already defined in `graph_db/schema.py`):
-- Constraint: `(ui.id) IS UNIQUE`
-- Index: `(ui.user_id, ui.project_id)`
+---
+
+## Helper Functions in `partial_recon.py`
+
+Reuse these -- do not reimplement:
+
+| Function | Purpose |
+|----------|---------|
+| `_classify_ip(address, version=None)` | Returns `"ipv4"` or `"ipv6"`. |
+| `_is_ip_or_cidr(value)` | Validates IP or CIDR. |
+| `_is_valid_hostname(value)` | Validates hostname regex. |
+| `_resolve_hostname(hostname)` | DNS resolves via `socket.getaddrinfo()`. Returns `{"ipv4": [...], "ipv6": [...]}`. |
+| `_build_recon_data_from_graph(domain, user_id, project_id)` | Queries Neo4j, returns `recon_data` dict for `extract_targets_from_recon()`. |
+| `load_config()` | Loads JSON config from `PARTIAL_RECON_CONFIG` env var. |
+
+---
+
+## Frontend Validation
+
+Separate validators per input type (in `PartialReconModal.tsx`):
+
+| Validator | Input type | Rules |
+|---|---|---|
+| `validateSubdomain(value, domain)` | Hostnames | Hostname regex + must end with `.{domain}` or equal `{domain}` |
+| `validateIp(value)` | IPs/CIDRs | IPv4 octets 0-255, IPv6 format, CIDR /24-/32 (v4) or /120-/128 (v6) |
+
+Each textarea runs its validator per line via `validateLines(text, validator)` in `useMemo`. Errors show per-line below each textarea. Run button disabled if any textarea has errors.
 
 ---
 
@@ -287,21 +421,35 @@ The `UserInput` node is connected to the Domain via `HAS_USER_INPUT` and to prod
 
 After implementing:
 
-1. `docker compose --profile tools build recon` (new code baked into image)
-2. `docker compose restart recon-orchestrator` (picks up volume-mounted changes)
-3. Dev webapp hot-reloads automatically
-4. Test: click play button on the new tool in workflow graph
-5. Verify: modal shows correct input/output node types from nodeMapping.ts
-6. Verify: click Run, redirects to /graph, drawer opens with logs
-7. Verify: query Neo4j to confirm new nodes were created/merged
-8. Verify: running partial recon disables "Start Recon Pipeline" button
-9. Verify: full pipeline still works unchanged
+1. `docker compose --profile tools build recon` (code baked into image)
+2. `docker compose restart recon-orchestrator` (if you changed models.py or api.py)
+3. Dev webapp hot-reloads (no rebuild for frontend)
+4. Click play on the new tool in workflow graph
+5. Verify: modal shows separate textareas per input type
+6. Verify: dropdown shows existing graph nodes + custom subdomains from textarea
+7. Verify: validation works per textarea (invalid entries, wrong domain, oversized CIDR)
+8. Verify: Run button disabled while errors exist
+9. Click Run, check logs drawer (no phase dots, shows "Scanning: <name>")
+10. Query Neo4j: subdomains created as real nodes, IPs linked via RESOLVES_TO or UserInput
+11. **Compare with Naabu**: run Naabu partial recon to see the reference behavior
 
 ---
 
 ## Existing Tests
 
-- **Python**: `recon/tests/test_partial_recon.py` -- unit tests for config loading + subdomain discovery orchestration
-- **TypeScript**: `webapp/src/lib/partial-recon-types.test.ts` -- type shape validation tests
+**Python** (`recon/tests/test_partial_recon.py`):
+- `TestLoadConfig` -- config loading
+- `TestClassifyIp` -- IP classification
+- `TestIsIpOrCidr` / `TestIsValidHostname` -- validation helpers
+- `TestBuildReconDataFromGraph` -- graph data reconstruction
+- `TestRunSubdomainDiscovery` -- subdomain discovery orchestration
+- `TestRunNaabu` -- port scan with legacy flat inputs
+- `TestRunNaabuCidrExpansion` -- CIDR expansion, dedup, IPv6
+- `TestRunNaabuHostnameInputs` -- hostname resolution, graph node creation
+- `TestRunNaabuStructuredTargets` -- new `user_targets` format: attach to subdomain, generic, backward compat
+
+**TypeScript** (`webapp/src/lib/partial-recon-types.test.ts`):
+- Type shape validation for `UserTargets`, `GraphInputs`, `PartialReconParams`
+- Supported tools and phase map
 
 Add tests for the new tool following the same patterns.

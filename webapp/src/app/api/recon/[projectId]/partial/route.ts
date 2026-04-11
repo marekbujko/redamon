@@ -34,6 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         tool_id: body.tool_id,
         graph_inputs: body.graph_inputs,
         user_inputs: body.user_inputs || [],
+        user_targets: body.user_targets || null,
         dedup_enabled: body.dedup_enabled ?? true,
         settings_overrides: body.settings_overrides || {},
       }),

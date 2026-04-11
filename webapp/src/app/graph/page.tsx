@@ -24,7 +24,7 @@ import { exportToExcel } from './utils/exportExcel'
 import { useTheme, useSession, useReconStatus, useReconSSE, useGvmStatus, useGvmSSE, useGithubHuntStatus, useGithubHuntSSE, useTrufflehogStatus, useTrufflehogSSE, useActiveSessions, usePartialReconStatus, usePartialReconSSE } from '@/hooks'
 import { useProjectById } from '@/hooks/useProjects'
 import { useProject } from '@/providers/ProjectProvider'
-import { GVM_PHASES, GITHUB_HUNT_PHASES, TRUFFLEHOG_PHASES, PARTIAL_RECON_PHASES } from '@/lib/recon-types'
+import { GVM_PHASES, GITHUB_HUNT_PHASES, TRUFFLEHOG_PHASES, PARTIAL_RECON_PHASE_MAP } from '@/lib/recon-types'
 import { WORKFLOW_TOOLS } from '@/components/projects/ProjectForm/WorkflowView/workflowDefinition'
 import type { ReconStatus } from '@/lib/recon-types'
 import { OtherScansModal } from './components/OtherScansModal/OtherScansModal'
@@ -1224,8 +1224,9 @@ export default function GraphPage() {
         onClearLogs={clearPartialReconLogs}
         onStop={handleStopPartialRecon}
         title={`Partial Recon: ${WORKFLOW_TOOLS.find(t => t.id === partialReconState?.tool_id)?.label || 'Running'}`}
-        phases={PARTIAL_RECON_PHASES}
-        totalPhases={1}
+        phases={PARTIAL_RECON_PHASE_MAP[partialReconState?.tool_id || ''] || ['Running']}
+        totalPhases={(PARTIAL_RECON_PHASE_MAP[partialReconState?.tool_id || ''] || ['Running']).length}
+        hidePhaseProgress
       />
 
       <AIAssistantDrawer

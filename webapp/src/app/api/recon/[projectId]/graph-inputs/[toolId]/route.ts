@@ -50,10 +50,47 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    else if (toolId === 'Naabu') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)
+             OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)
+             WITH d, collect(DISTINCT s.name) AS subdomains,
+                  count(DISTINCT i) + count(DISTINCT di) AS ipCount
+             RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
+          const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
+          const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_subdomains: subdomains,
+              existing_subdomains_count: subCount,
+              existing_ips_count: ipCount,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for Naabu graph-inputs, falling back to settings:', err)
+      }
+    }
+
     // Fallback: return domain from project settings
     return NextResponse.json({
       domain: project.targetDomain || null,
       existing_subdomains_count: 0,
+      existing_ips_count: 0,
       source: 'settings',
     })
 

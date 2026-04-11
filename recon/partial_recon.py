@@ -9,6 +9,7 @@ PARTIAL_RECON_CONFIG environment variable.
 
 Currently supported tool_ids:
   - SubdomainDiscovery: runs discover_subdomains() from domain_recon.py
+  - Naabu: runs run_port_scan() from port_scan.py
 """
 
 import os
@@ -186,6 +187,482 @@ def run_subdomain_discovery(config: dict) -> None:
     print(f"\n[+][Partial Recon] Subdomain discovery completed successfully")
 
 
+def _classify_ip(address: str, version: str = None) -> str:
+    """Return 'ipv4' or 'ipv6' for an IP address."""
+    if version:
+        v = version.lower()
+        if "4" in v:
+            return "ipv4"
+        if "6" in v:
+            return "ipv6"
+    import ipaddress as _ipaddress
+    try:
+        return "ipv4" if _ipaddress.ip_address(address).version == 4 else "ipv6"
+    except ValueError:
+        return "ipv4"
+
+
+def _build_recon_data_from_graph(domain: str, user_id: str, project_id: str) -> dict:
+    """
+    Query Neo4j to build the recon_data dict that run_port_scan expects.
+
+    Returns a dict with 'domain' and 'dns' keys matching the structure
+    produced by domain_recon.py (domain IPs + subdomain IPs).
+    """
+    from graph_db import Neo4jClient
+
+    recon_data = {
+        "domain": domain,
+        "dns": {
+            "domain": {"ips": {"ipv4": [], "ipv6": []}, "has_records": False},
+            "subdomains": {},
+        },
+    }
+
+    with Neo4jClient() as graph_client:
+        if not graph_client.verify_connection():
+            print("[!][Partial Recon] Neo4j not reachable, cannot fetch graph inputs")
+            return recon_data
+
+        driver = graph_client.driver
+        with driver.session() as session:
+            # Query domain -> IP relationships
+            result = session.run(
+                """
+                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                      -[:RESOLVES_TO]->(i:IP)
+                RETURN i.address AS address, i.version AS version
+                """,
+                domain=domain, uid=user_id, pid=project_id,
+            )
+            for record in result:
+                addr = record["address"]
+                bucket = _classify_ip(addr, record["version"])
+                recon_data["dns"]["domain"]["ips"][bucket].append(addr)
+
+            if (recon_data["dns"]["domain"]["ips"]["ipv4"]
+                    or recon_data["dns"]["domain"]["ips"]["ipv6"]):
+                recon_data["dns"]["domain"]["has_records"] = True
+
+            # Query subdomain -> IP relationships
+            result = session.run(
+                """
+                MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                      -[:HAS_SUBDOMAIN]->(s:Subdomain)
+                      -[:RESOLVES_TO]->(i:IP)
+                RETURN s.name AS subdomain, i.address AS address, i.version AS version
+                """,
+                domain=domain, uid=user_id, pid=project_id,
+            )
+            for record in result:
+                sub = record["subdomain"]
+                addr = record["address"]
+                bucket = _classify_ip(addr, record["version"])
+
+                if sub not in recon_data["dns"]["subdomains"]:
+                    recon_data["dns"]["subdomains"][sub] = {
+                        "ips": {"ipv4": [], "ipv6": []},
+                        "has_records": True,
+                    }
+                recon_data["dns"]["subdomains"][sub]["ips"][bucket].append(addr)
+
+    return recon_data
+
+
+def _resolve_hostname(hostname: str) -> dict:
+    """
+    Resolve a hostname to IPs via socket.getaddrinfo.
+
+    Returns {"ipv4": [...], "ipv6": [...]}.
+    """
+    import socket
+    ips = {"ipv4": [], "ipv6": []}
+    try:
+        results = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in results:
+            addr = sockaddr[0]
+            if family == socket.AF_INET and addr not in ips["ipv4"]:
+                ips["ipv4"].append(addr)
+            elif family == socket.AF_INET6 and addr not in ips["ipv6"]:
+                ips["ipv6"].append(addr)
+    except socket.gaierror:
+        pass
+    return ips
+
+
+def _is_ip_or_cidr(value: str) -> bool:
+    """Check if value is an IP address or CIDR range."""
+    import ipaddress as _ipaddress
+    try:
+        if "/" in value:
+            _ipaddress.ip_network(value, strict=False)
+        else:
+            _ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+_HOSTNAME_RE = None
+
+def _is_valid_hostname(value: str) -> bool:
+    """Check if value looks like a valid hostname/subdomain."""
+    global _HOSTNAME_RE
+    if _HOSTNAME_RE is None:
+        import re
+        _HOSTNAME_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
+    return bool(_HOSTNAME_RE.match(value))
+
+
+def run_naabu(config: dict) -> None:
+    """
+    Run partial port scanning using the exact same function
+    as the full pipeline in port_scan.py.
+    """
+    import ipaddress as _ipaddress
+    from recon.port_scan import run_port_scan
+    from recon.project_settings import get_settings
+
+    domain = config["domain"]
+    user_inputs = config.get("user_inputs", [])
+    dedup_enabled = config.get("dedup_enabled", True)
+    user_id = os.environ.get("USER_ID", "")
+    project_id = os.environ.get("PROJECT_ID", "")
+
+    print(f"[*][Partial Recon] Loading project settings...")
+    settings = get_settings()
+
+    print(f"\n{'=' * 50}")
+    print(f"[*][Partial Recon] Port Scanning (Naabu)")
+    print(f"[*][Partial Recon] Domain: {domain}")
+    print(f"{'=' * 50}\n")
+
+    # Parse user targets (structured format from new modal, or legacy flat list)
+    user_targets = config.get("user_targets") or {}
+    user_ips = []           # validated IPs and CIDRs
+    user_hostnames = []     # validated hostnames/subdomains
+    ip_attach_to = None     # subdomain to attach IPs to (None = UserInput)
+    user_input_id = None    # only created when IPs are generic (no subdomain attachment)
+
+    if user_targets:
+        # New structured format: {subdomains: [...], ips: [...], ip_attach_to: "..." | null}
+        for entry in user_targets.get("subdomains", []):
+            entry = entry.strip().lower()
+            if entry and _is_valid_hostname(entry):
+                user_hostnames.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid subdomain: {entry}")
+
+        for entry in user_targets.get("ips", []):
+            entry = entry.strip()
+            if entry and _is_ip_or_cidr(entry):
+                user_ips.append(entry)
+            elif entry:
+                print(f"[!][Partial Recon] Skipping invalid IP: {entry}")
+
+        ip_attach_to = user_targets.get("ip_attach_to")  # subdomain name or None
+
+    elif user_inputs:
+        # Legacy flat list fallback: classify each entry
+        for entry in user_inputs:
+            entry = entry.strip().lower()
+            if not entry:
+                continue
+            if _is_ip_or_cidr(entry):
+                user_ips.append(entry)
+            elif _is_valid_hostname(entry):
+                user_hostnames.append(entry)
+            else:
+                print(f"[!][Partial Recon] Skipping invalid target: {entry}")
+
+    if user_ips:
+        print(f"[+][Partial Recon] Validated {len(user_ips)} custom IPs/CIDRs")
+        if ip_attach_to:
+            print(f"[+][Partial Recon] IPs will be attached to subdomain: {ip_attach_to}")
+        else:
+            print(f"[+][Partial Recon] IPs will be tracked via UserInput (generic)")
+    if user_hostnames:
+        print(f"[+][Partial Recon] Validated {len(user_hostnames)} custom hostnames")
+
+    # Create UserInput node only when IPs are generic (no subdomain attachment)
+    if user_ips and not ip_attach_to:
+        user_input_id = str(uuid.uuid4())
+        try:
+            from graph_db import Neo4jClient
+            with Neo4jClient() as graph_client:
+                if graph_client.verify_connection():
+                    graph_client.create_user_input_node(
+                        domain=domain,
+                        user_input_data={
+                            "id": user_input_id,
+                            "input_type": "ips",
+                            "values": user_ips,
+                            "tool_id": "Naabu",
+                            "dedup_enabled": dedup_enabled,
+                        },
+                        user_id=user_id,
+                        project_id=project_id,
+                    )
+                    print(f"[+][Partial Recon] Created UserInput node for IPs: {user_input_id}")
+                else:
+                    print("[!][Partial Recon] Neo4j not reachable, skipping UserInput node")
+                    user_input_id = None
+        except Exception as e:
+            print(f"[!][Partial Recon] Failed to create UserInput node: {e}")
+            user_input_id = None
+
+    # Build recon_data from Neo4j graph
+    print(f"[*][Partial Recon] Querying graph for targets (IPs and subdomains)...")
+    recon_data = _build_recon_data_from_graph(domain, user_id, project_id)
+
+    # STEP 1: Resolve user-provided hostnames FIRST (before IP injection)
+    # This ensures the subdomain entry exists if ip_attach_to references a custom subdomain
+    resolved_hostnames = {}  # hostname -> {"ipv4": [...], "ipv6": [...]}
+    if user_hostnames:
+        print(f"[*][Partial Recon] Resolving {len(user_hostnames)} user-provided hostnames...")
+        for hostname in user_hostnames:
+            if hostname in recon_data["dns"]["subdomains"]:
+                print(f"[*][Partial Recon] {hostname} already in graph, skipping")
+                continue
+            ips = _resolve_hostname(hostname)
+            if ips["ipv4"] or ips["ipv6"]:
+                recon_data["dns"]["subdomains"][hostname] = {
+                    "ips": ips,
+                    "has_records": True,
+                }
+                resolved_hostnames[hostname] = ips
+                print(f"[+][Partial Recon] Resolved {hostname} -> {ips['ipv4'] + ips['ipv6']}")
+            else:
+                print(f"[!][Partial Recon] Could not resolve {hostname}, skipping")
+
+        # Create Subdomain + IP + relationships in Neo4j for newly resolved hostnames
+        if resolved_hostnames:
+            print(f"[*][Partial Recon] Creating graph nodes for {len(resolved_hostnames)} user hostnames...")
+            try:
+                from graph_db import Neo4jClient
+                with Neo4jClient() as graph_client:
+                    if graph_client.verify_connection():
+                        driver = graph_client.driver
+                        with driver.session() as session:
+                            for hostname, ips in resolved_hostnames.items():
+                                # MERGE Subdomain node
+                                session.run(
+                                    """
+                                    MERGE (s:Subdomain {name: $name, user_id: $uid, project_id: $pid})
+                                    SET s.has_dns_records = true,
+                                        s.status = coalesce(s.status, 'resolved'),
+                                        s.discovered_at = coalesce(s.discovered_at, datetime()),
+                                        s.updated_at = datetime(),
+                                        s.source = 'partial_recon_user_input'
+                                    """,
+                                    name=hostname, uid=user_id, pid=project_id,
+                                )
+                                # MERGE Domain <-> Subdomain relationships
+                                session.run(
+                                    """
+                                    MATCH (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+                                    MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                    MERGE (s)-[:BELONGS_TO]->(d)
+                                    MERGE (d)-[:HAS_SUBDOMAIN]->(s)
+                                    """,
+                                    domain=domain, sub=hostname, uid=user_id, pid=project_id,
+                                )
+                                # MERGE IP nodes + RESOLVES_TO relationships
+                                for ip_version in ("ipv4", "ipv6"):
+                                    for ip_addr in ips.get(ip_version, []):
+                                        session.run(
+                                            """
+                                            MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                            SET i.version = $version, i.updated_at = datetime()
+                                            """,
+                                            addr=ip_addr, uid=user_id, pid=project_id, version=ip_version,
+                                        )
+                                        record_type = "A" if ip_version == "ipv4" else "AAAA"
+                                        session.run(
+                                            """
+                                            MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                            MATCH (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                            MERGE (s)-[:RESOLVES_TO {record_type: $rtype}]->(i)
+                                            """,
+                                            sub=hostname, addr=ip_addr, uid=user_id, pid=project_id, rtype=record_type,
+                                        )
+                                print(f"[+][Partial Recon] Created graph nodes for {hostname}")
+                    else:
+                        print("[!][Partial Recon] Neo4j not reachable, skipping subdomain node creation")
+            except Exception as e:
+                print(f"[!][Partial Recon] Failed to create subdomain nodes: {e}")
+
+    # STEP 2: Inject user-provided IPs/CIDRs into recon_data (AFTER hostname resolution)
+    # If ip_attach_to is set, inject into that subdomain's entry; otherwise into domain IPs
+    # Safety: if ip_attach_to points to a subdomain that failed resolution, fall back to generic
+    if ip_attach_to and ip_attach_to not in recon_data["dns"]["subdomains"]:
+        # Check if the subdomain exists in Neo4j graph already
+        _sub_exists = False
+        try:
+            from graph_db import Neo4jClient
+            with Neo4jClient() as _gc:
+                if _gc.verify_connection():
+                    _r = _gc.driver.session()
+                    with _gc.driver.session() as _s:
+                        _res = _s.run(
+                            "MATCH (s:Subdomain {name: $name, user_id: $uid, project_id: $pid}) RETURN s LIMIT 1",
+                            name=ip_attach_to, uid=user_id, pid=project_id,
+                        )
+                        _sub_exists = _res.single() is not None
+        except Exception:
+            pass
+        if not _sub_exists:
+            print(f"[!][Partial Recon] Subdomain {ip_attach_to} not found in graph, falling back to generic UserInput for IPs")
+            ip_attach_to = None
+            # Create UserInput node since we're now generic
+            if user_ips:
+                user_input_id = str(uuid.uuid4())
+                try:
+                    from graph_db import Neo4jClient
+                    with Neo4jClient() as graph_client:
+                        if graph_client.verify_connection():
+                            graph_client.create_user_input_node(
+                                domain=domain,
+                                user_input_data={
+                                    "id": user_input_id,
+                                    "input_type": "ips",
+                                    "values": user_ips,
+                                    "tool_id": "Naabu",
+                                    "dedup_enabled": dedup_enabled,
+                                },
+                                user_id=user_id,
+                                project_id=project_id,
+                            )
+                            print(f"[+][Partial Recon] Created fallback UserInput node: {user_input_id}")
+                except Exception:
+                    user_input_id = None
+
+    user_ip_addrs = []  # flat list of individual IPs from user (after CIDR expansion)
+    if user_ips:
+        if ip_attach_to:
+            # Ensure the target subdomain entry exists (may have been created by hostname resolution above)
+            if ip_attach_to not in recon_data["dns"]["subdomains"]:
+                recon_data["dns"]["subdomains"][ip_attach_to] = {
+                    "ips": {"ipv4": [], "ipv6": []},
+                    "has_records": True,
+                }
+            target_ips = recon_data["dns"]["subdomains"][ip_attach_to]["ips"]
+            print(f"[*][Partial Recon] Adding {len(user_ips)} user-provided IPs/CIDRs -> {ip_attach_to}")
+        else:
+            target_ips = recon_data["dns"]["domain"]["ips"]
+            print(f"[*][Partial Recon] Adding {len(user_ips)} user-provided IPs/CIDRs -> domain (generic)")
+
+        for ip_str in user_ips:
+            if "/" in ip_str:
+                try:
+                    network = _ipaddress.ip_network(ip_str, strict=False)
+                    if network.num_addresses > 256:
+                        print(f"[!][Partial Recon] CIDR {ip_str} too large ({network.num_addresses} hosts), max /24 (256). Skipping.")
+                        continue
+                    for host_ip in network.hosts():
+                        addr = str(host_ip)
+                        bucket = _classify_ip(addr)
+                        if addr not in target_ips[bucket]:
+                            target_ips[bucket].append(addr)
+                        user_ip_addrs.append(addr)
+                    if not ip_attach_to:
+                        recon_data["dns"]["domain"]["has_records"] = True
+                except ValueError:
+                    print(f"[!][Partial Recon] Invalid CIDR: {ip_str}")
+            else:
+                bucket = _classify_ip(ip_str)
+                if ip_str not in target_ips[bucket]:
+                    target_ips[bucket].append(ip_str)
+                    if not ip_attach_to:
+                        recon_data["dns"]["domain"]["has_records"] = True
+                user_ip_addrs.append(ip_str)
+
+    # Check we have targets
+    domain_ips = recon_data["dns"]["domain"]["ips"]
+    sub_count = len(recon_data["dns"]["subdomains"])
+    ip_count = len(domain_ips["ipv4"]) + len(domain_ips["ipv6"])
+    for sub_data in recon_data["dns"]["subdomains"].values():
+        ip_count += len(sub_data["ips"]["ipv4"]) + len(sub_data["ips"]["ipv6"])
+
+    if ip_count == 0:
+        print("[!][Partial Recon] No scannable targets found (graph is empty and no valid user targets resolved).")
+        print("[!][Partial Recon] Run Subdomain Discovery first, or provide IPs/subdomains manually.")
+        sys.exit(1)
+
+    print(f"[+][Partial Recon] Found {ip_count} IPs across {sub_count} subdomains + domain")
+
+    # Run port scan (same function as full pipeline)
+    print(f"[*][Partial Recon] Running port scan...")
+    result = run_port_scan(recon_data, output_file=None, settings=settings)
+
+    # Update the graph database
+    print(f"[*][Partial Recon] Updating graph database...")
+    try:
+        from graph_db import Neo4jClient
+        with Neo4jClient() as graph_client:
+            if graph_client.verify_connection():
+                stats = graph_client.update_graph_from_port_scan(
+                    recon_data=result,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+
+                # Link user-provided IPs to graph
+                if user_ip_addrs:
+                    driver = graph_client.driver
+                    with driver.session() as session:
+                        if ip_attach_to and not user_input_id:
+                            # IPs attached to a subdomain: create RESOLVES_TO relationships
+                            for ip_addr in user_ip_addrs:
+                                ip_version = _classify_ip(ip_addr)
+                                record_type = "A" if ip_version == "ipv4" else "AAAA"
+                                session.run(
+                                    """
+                                    MERGE (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                    SET i.version = $version, i.updated_at = datetime()
+                                    WITH i
+                                    MATCH (s:Subdomain {name: $sub, user_id: $uid, project_id: $pid})
+                                    MERGE (s)-[:RESOLVES_TO {record_type: $rtype}]->(i)
+                                    """,
+                                    addr=ip_addr, uid=user_id, pid=project_id,
+                                    version=ip_version, sub=ip_attach_to, rtype=record_type,
+                                )
+                            print(f"[+][Partial Recon] Linked {len(user_ip_addrs)} IPs to {ip_attach_to} via RESOLVES_TO")
+                        elif user_input_id:
+                            # Generic IPs: link via UserInput -[:PRODUCED]-> IP
+                            for ip_addr in user_ip_addrs:
+                                session.run(
+                                    """
+                                    MATCH (ui:UserInput {id: $ui_id})
+                                    MATCH (i:IP {address: $addr, user_id: $uid, project_id: $pid})
+                                    MERGE (ui)-[:PRODUCED]->(i)
+                                    """,
+                                    ui_id=user_input_id, addr=ip_addr, uid=user_id, pid=project_id,
+                                )
+                            graph_client.update_user_input_status(
+                                user_input_id, "completed", stats
+                            )
+                            print(f"[+][Partial Recon] Linked {len(user_ip_addrs)} IPs via UserInput PRODUCED")
+
+                print(f"[+][Partial Recon] Graph updated successfully")
+                print(f"[+][Partial Recon] Stats: {json.dumps(stats, default=str)}")
+            else:
+                print("[!][Partial Recon] Neo4j not reachable, graph not updated")
+    except Exception as e:
+        print(f"[!][Partial Recon] Graph update failed: {e}")
+        if user_input_id:
+            try:
+                from graph_db import Neo4jClient
+                with Neo4jClient() as gc:
+                    if gc.verify_connection():
+                        gc.update_user_input_status(user_input_id, "error", {"error": str(e)})
+            except Exception:
+                pass
+        raise
+
+    print(f"\n[+][Partial Recon] Port scanning completed successfully")
+
+
 def main():
     config = load_config()
     tool_id = config.get("tool_id", "")
@@ -195,6 +672,8 @@ def main():
 
     if tool_id == "SubdomainDiscovery":
         run_subdomain_discovery(config)
+    elif tool_id == "Naabu":
+        run_naabu(config)
     else:
         print(f"[!][Partial Recon] Unknown tool_id: {tool_id}")
         sys.exit(1)
