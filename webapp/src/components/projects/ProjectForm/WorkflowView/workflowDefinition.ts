@@ -1,4 +1,5 @@
-import { SECTION_INPUT_MAP, SECTION_NODE_MAP } from '../nodeMapping'
+import { SECTION_INPUT_MAP, SECTION_NODE_MAP, SECTION_ENRICH_MAP } from '../nodeMapping'
+import { NODE_COLORS } from '@/app/graph/config/colors'
 
 // ---- Tool definitions ----
 
@@ -100,6 +101,11 @@ export const CATEGORY_COLORS: Record<DataNodeCategory, string> = {
   external: '#eab308',
 }
 
+// Per-node color from the graph legend (falls back to category color)
+export function getNodeColor(nodeType: string): string {
+  return NODE_COLORS[nodeType] ?? CATEGORY_COLORS[DATA_NODE_CATEGORIES[nodeType] ?? 'identity'] ?? '#6b7280'
+}
+
 // Group stage metadata
 export const WORKFLOW_GROUPS: { group: number; label: string; color: string }[] = [
   { group: 0,   label: 'Input',          color: '#6b7280' },
@@ -126,4 +132,8 @@ export function getToolProduces(toolId: string): string[] {
 
 export function getToolConsumes(toolId: string): string[] {
   return (SECTION_INPUT_MAP[toolId] ?? []).filter(n => ALL_WORKFLOW_DATA_NODES.has(n))
+}
+
+export function getToolEnriches(toolId: string): string[] {
+  return (SECTION_ENRICH_MAP[toolId] ?? []).filter(n => ALL_WORKFLOW_DATA_NODES.has(n))
 }

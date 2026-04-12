@@ -1325,7 +1325,6 @@ When user asks about "JS findings", "JavaScript attack surface", "JS secrets", o
 - input_type (string): "subdomains", "ips", "urls", "domains"
 - values (string[]): user-provided values
 - tool_id (string): which tool was run (e.g. "SubdomainDiscovery")
-- dedup_enabled (boolean): whether deduplication was enabled
 - status (string): "running", "completed", "error"
 - stats (string): JSON with run statistics
 - created_at (datetime), completed_at (datetime)

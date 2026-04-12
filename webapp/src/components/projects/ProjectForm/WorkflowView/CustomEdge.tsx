@@ -1,7 +1,7 @@
 'use client'
 
 import { memo } from 'react'
-import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react'
+import { getSmoothStepPath, type EdgeProps } from '@xyflow/react'
 
 function CustomEdgeComponent({
   sourceX,
@@ -11,8 +11,7 @@ function CustomEdgeComponent({
   sourcePosition,
   targetPosition,
   style = {},
-  animated,
-  markerEnd,
+  data,
 }: EdgeProps) {
   const [edgePath] = getSmoothStepPath({
     sourceX,
@@ -29,6 +28,14 @@ function CustomEdgeComponent({
   const opacity = (style as Record<string, unknown>).opacity as number ?? 0.5
   const strokeDasharray = (style as Record<string, unknown>).strokeDasharray as string ?? '6 3'
 
+  const shouldAnimate = (data as Record<string, unknown>)?.shouldAnimate as boolean ?? false
+  const isEnrich = (data as Record<string, unknown>)?.isEnrich as boolean ?? false
+
+  let animClass: string | undefined
+  if (shouldAnimate) {
+    animClass = isEnrich ? 'workflow-edge-animated-dot' : 'workflow-edge-animated'
+  }
+
   return (
     <g>
       <path
@@ -38,7 +45,7 @@ function CustomEdgeComponent({
         strokeWidth={strokeWidth}
         opacity={opacity}
         strokeDasharray={strokeDasharray}
-        className={animated ? 'workflow-edge-animated' : undefined}
+        className={animClass}
       />
       <path
         d={edgePath}

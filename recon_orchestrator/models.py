@@ -225,7 +225,7 @@ class PartialReconStartRequest(BaseModel):
     graph_inputs: dict                        # e.g. {"domain": "example.com"}
     user_inputs: list[str] = []               # user-added values (SubdomainDiscovery)
     user_targets: dict | None = None          # structured inputs (Naabu: {subdomains, ips, ip_attach_to})
-    dedup_enabled: bool = True
+    include_graph_targets: bool = True        # whether to include existing graph data in scan
     settings_overrides: dict = {}             # optional per-tool settings
 
 

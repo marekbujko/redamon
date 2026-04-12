@@ -18,6 +18,7 @@ import {
   TRANSITIONAL_DATA_NODES,
   getToolProduces,
   getToolConsumes,
+  getToolEnriches,
 } from './workflowDefinition'
 
 // ---- Dimension constants ----
@@ -60,7 +61,7 @@ function getDataNodeGroup(nodeType: string): number {
 
   let minProducer = Infinity
   for (const tool of WORKFLOW_TOOLS) {
-    if (getToolProduces(tool.id).includes(nodeType)) {
+    if (getToolProduces(tool.id).includes(nodeType) || getToolEnriches(tool.id).includes(nodeType)) {
       minProducer = Math.min(minProducer, tool.group)
     }
   }
@@ -68,7 +69,7 @@ function getDataNodeGroup(nodeType: string): number {
   if (minConsumer === Infinity) {
     let maxProducer = 0
     for (const tool of WORKFLOW_TOOLS) {
-      if (getToolProduces(tool.id).includes(nodeType)) {
+      if (getToolProduces(tool.id).includes(nodeType) || getToolEnriches(tool.id).includes(nodeType)) {
         maxProducer = Math.max(maxProducer, tool.group)
       }
     }

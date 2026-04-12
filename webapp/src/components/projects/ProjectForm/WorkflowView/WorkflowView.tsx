@@ -196,8 +196,14 @@ export function WorkflowView({ formData, updateField, projectId, mode, onSave, o
         @keyframes dashFlow {
           to { stroke-dashoffset: -18; }
         }
+        @keyframes dotFlow {
+          to { stroke-dashoffset: -12; }
+        }
         .workflow-edge-animated {
           animation: dashFlow 0.8s linear infinite;
+        }
+        .workflow-edge-animated-dot {
+          animation: dotFlow 0.6s linear infinite;
         }
       `}} />
       <ReactFlow

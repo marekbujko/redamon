@@ -15,9 +15,10 @@ import {
   getGroupColor,
   getToolProduces,
   getToolConsumes,
+  getToolEnriches,
   type WorkflowToolDef,
 } from './workflowDefinition'
-import { SECTION_INPUT_MAP, SECTION_NODE_MAP } from '../nodeMapping'
+import { SECTION_INPUT_MAP, SECTION_NODE_MAP, SECTION_ENRICH_MAP } from '../nodeMapping'
 import {
   computeLayout,
   TOOL_NODE_WIDTH,
@@ -115,11 +116,10 @@ describe('workflowDefinition', () => {
       expect(produces).toContain('Service')
     })
 
-    test('Nmap consumes IP, Port, and Service', () => {
+    test('Nmap consumes IP and Port', () => {
       const consumes = getToolConsumes('Nmap')
       expect(consumes).toContain('IP')
       expect(consumes).toContain('Port')
-      expect(consumes).toContain('Service')
     })
 
     test('filters out non-workflow data nodes (e.g. ThreatPulse, Malware)', () => {
@@ -133,9 +133,33 @@ describe('workflowDefinition', () => {
       expect(produces).toContain('CVE')
     })
 
+    test('Nmap enriches Port and Service', () => {
+      const enriches = getToolEnriches('Nmap')
+      expect(enriches).toContain('Port')
+      expect(enriches).toContain('Service')
+    })
+
+    test('Urlscan enriches Domain and IP', () => {
+      const enriches = getToolEnriches('Urlscan')
+      expect(enriches).toContain('Domain')
+      expect(enriches).toContain('IP')
+    })
+
+    test('Httpx enriches Subdomain and Domain', () => {
+      const enriches = getToolEnriches('Httpx')
+      expect(enriches).toContain('Subdomain')
+      expect(enriches).toContain('Domain')
+    })
+
+    test('tools without enrichments return empty array', () => {
+      expect(getToolEnriches('Katana')).toEqual([])
+      expect(getToolEnriches('Nuclei')).toEqual([])
+    })
+
     test('returns empty array for unknown tool', () => {
       expect(getToolProduces('NonExistentTool')).toEqual([])
       expect(getToolConsumes('NonExistentTool')).toEqual([])
+      expect(getToolEnriches('NonExistentTool')).toEqual([])
     })
   })
 })
@@ -158,6 +182,9 @@ describe('workflowLayout / computeLayout', () => {
         if (ALL_WORKFLOW_DATA_NODES.has(nt)) connectedDataNodes.add(nt)
       }
       for (const nt of getToolConsumes(tool.id)) {
+        if (ALL_WORKFLOW_DATA_NODES.has(nt)) connectedDataNodes.add(nt)
+      }
+      for (const nt of getToolEnriches(tool.id)) {
         if (ALL_WORKFLOW_DATA_NODES.has(nt)) connectedDataNodes.add(nt)
       }
     }
@@ -437,7 +464,6 @@ describe('workflow graph logic', () => {
       const { toolBrokenInputs } = computeGraphState(fields)
       const broken = toolBrokenInputs.get('Nmap') ?? []
       expect(broken).toContain('Port')
-      expect(broken).toContain('Service')
     })
 
     test('Katana is chain-broken when BaseURL is starved', () => {

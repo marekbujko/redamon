@@ -22,6 +22,14 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Naabu')).toBe(true)
   })
 
+  test('contains Masscan', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Masscan')).toBe(true)
+  })
+
+  test('contains Nmap', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Nmap')).toBe(true)
+  })
+
   test('does not contain unsupported tools', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Nuclei')).toBe(false)
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('Httpx')).toBe(false)
@@ -38,6 +46,16 @@ describe('PARTIAL_RECON_PHASE_MAP', () => {
   test('has Naabu phases', () => {
     expect(PARTIAL_RECON_PHASE_MAP['Naabu']).toHaveLength(1)
     expect(PARTIAL_RECON_PHASE_MAP['Naabu'][0]).toBe('Port Scanning')
+  })
+
+  test('has Masscan phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Masscan']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Masscan'][0]).toBe('Port Scanning')
+  })
+
+  test('has Nmap phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['Nmap']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['Nmap'][0]).toBe('Nmap Service Detection')
   })
 
   test('each supported tool has a phase entry', () => {
@@ -159,6 +177,17 @@ describe('GraphInputs type shape', () => {
     }
     expect(inputs.existing_ips_count).toBe(5)
   })
+
+  test('with existing_ports_count for Nmap', () => {
+    const inputs: GraphInputs = {
+      domain: 'example.com',
+      existing_subdomains_count: 10,
+      existing_ips_count: 5,
+      existing_ports_count: 23,
+      source: 'graph',
+    }
+    expect(inputs.existing_ports_count).toBe(23)
+  })
 })
 
 describe('PartialReconParams type shape', () => {
@@ -167,11 +196,9 @@ describe('PartialReconParams type shape', () => {
       tool_id: 'SubdomainDiscovery',
       graph_inputs: { domain: 'example.com' },
       user_inputs: [],
-      dedup_enabled: true,
     }
     expect(params.tool_id).toBe('SubdomainDiscovery')
     expect(params.user_inputs).toHaveLength(0)
-    expect(params.dedup_enabled).toBe(true)
     expect(params.settings_overrides).toBeUndefined()
   })
 
@@ -180,11 +207,9 @@ describe('PartialReconParams type shape', () => {
       tool_id: 'SubdomainDiscovery',
       graph_inputs: { domain: 'example.com' },
       user_inputs: ['api.example.com', 'admin.example.com'],
-      dedup_enabled: false,
       settings_overrides: { SUBFINDER_ENABLED: false },
     }
     expect(params.user_inputs).toHaveLength(2)
-    expect(params.dedup_enabled).toBe(false)
     expect(params.settings_overrides).toBeDefined()
   })
 
@@ -199,7 +224,6 @@ describe('PartialReconParams type shape', () => {
       graph_inputs: { domain: 'example.com' },
       user_inputs: [],
       user_targets: targets,
-      dedup_enabled: true,
     }
     expect(params.tool_id).toBe('Naabu')
     expect(params.user_targets?.subdomains).toHaveLength(1)
@@ -213,7 +237,6 @@ describe('PartialReconParams type shape', () => {
       graph_inputs: { domain: 'example.com' },
       user_inputs: [],
       user_targets: { subdomains: [], ips: ['10.0.0.1'], ip_attach_to: null },
-      dedup_enabled: true,
     }
     expect(params.user_targets?.ip_attach_to).toBeNull()
   })
@@ -223,9 +246,49 @@ describe('PartialReconParams type shape', () => {
       tool_id: 'Naabu',
       graph_inputs: { domain: 'example.com' },
       user_inputs: [],
-      dedup_enabled: true,
     }
     expect(params.user_targets).toBeUndefined()
+  })
+
+  test('Nmap params with structured user_targets', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Nmap',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: { subdomains: [], ips: ['10.0.0.1'], ip_attach_to: null, ports: [8443, 9090] },
+    }
+    expect(params.tool_id).toBe('Nmap')
+    expect(params.user_targets?.ips).toHaveLength(1)
+    expect(params.user_targets?.ip_attach_to).toBeNull()
+    expect(params.user_targets?.ports).toHaveLength(2)
+    expect(params.user_targets?.ports).toContain(8443)
+  })
+
+  test('Nmap params without user_targets (graph only)', () => {
+    const params: PartialReconParams = {
+      tool_id: 'Nmap',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+    }
+    expect(params.user_targets).toBeUndefined()
+  })
+
+  test('Masscan params with structured user_targets', () => {
+    const targets: UserTargets = {
+      subdomains: ['api.example.com'],
+      ips: ['10.0.0.1', '192.168.1.0/24'],
+      ip_attach_to: 'api.example.com',
+    }
+    const params: PartialReconParams = {
+      tool_id: 'Masscan',
+      graph_inputs: { domain: 'example.com' },
+      user_inputs: [],
+      user_targets: targets,
+    }
+    expect(params.tool_id).toBe('Masscan')
+    expect(params.user_targets?.subdomains).toHaveLength(1)
+    expect(params.user_targets?.ips).toHaveLength(2)
+    expect(params.user_targets?.ip_attach_to).toBe('api.example.com')
   })
 })
 

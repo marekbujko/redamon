@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Play, Loader2, ArrowRight } from 'lucide-react'
 import { Modal } from '@/components/ui'
 import type { GraphInputs, PartialReconParams, UserTargets } from '@/lib/recon-types'
-import { SECTION_INPUT_MAP, SECTION_NODE_MAP } from '../nodeMapping'
+import { SECTION_INPUT_MAP, SECTION_NODE_MAP, SECTION_ENRICH_MAP } from '../nodeMapping'
 import { WORKFLOW_TOOLS } from './workflowDefinition'
 
 interface PartialReconModalProps {
@@ -28,6 +28,16 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
     'Targets are loaded from the graph (subdomains + IPs from prior discovery). ' +
     'You can also provide custom subdomains or IPs below. ' +
     'Port and Service nodes are merged into the existing graph -- duplicates are updated, not recreated.',
+  Masscan:
+    'High-speed SYN port scanner for large networks using raw SYN packets. ' +
+    'Targets are loaded from the graph (IPs from prior discovery). ' +
+    'You can also provide custom IPs below. ' +
+    'Port and Service nodes are merged into the existing graph -- duplicates are updated, not recreated.',
+  Nmap:
+    'Runs Nmap service version detection (-sV) and NSE vulnerability scripts on ports already discovered by Naabu. ' +
+    'Targets are loaded from the graph (IPs + open ports from prior port scanning). ' +
+    'You can also provide custom subdomains or IPs below. ' +
+    'Port, Service, Technology, Vulnerability, and CVE nodes are merged into the existing graph.',
 }
 
 // --- Validation helpers ---
@@ -59,6 +69,13 @@ function validateIp(value: string): string | null {
     return null
   }
   return `Invalid IP or CIDR: ${value}`
+}
+
+function validatePort(value: string): string | null {
+  const num = parseInt(value, 10)
+  if (isNaN(num) || !Number.isInteger(num)) return `Not a valid port number: ${value}`
+  if (num < 1 || num > 65535) return `Port must be 1-65535, got ${num}`
+  return null
 }
 
 function validateSubdomain(value: string, projectDomain: string): string | null {
@@ -115,10 +132,11 @@ export function PartialReconModal({
 }: PartialReconModalProps) {
   const [graphInputs, setGraphInputs] = useState<GraphInputs | null>(null)
   const [loadingInputs, setLoadingInputs] = useState(false)
-  // Naabu-specific state
   const [customSubdomains, setCustomSubdomains] = useState('')
   const [customIps, setCustomIps] = useState('')
   const [ipAttachTo, setIpAttachTo] = useState<string | null>(null)
+  const [customPorts, setCustomPorts] = useState('')
+  const [includeGraphTargets, setIncludeGraphTargets] = useState(true)
 
   useEffect(() => {
     if (!isOpen || !toolId || !projectId) return
@@ -126,20 +144,25 @@ export function PartialReconModal({
     setCustomSubdomains('')
     setCustomIps('')
     setIpAttachTo(null)
+    setCustomPorts('')
+    setIncludeGraphTargets(true)
     fetch(`/api/recon/${projectId}/graph-inputs/${toolId}`)
       .then(res => res.ok ? res.json() : null)
       .then((data: GraphInputs | null) => {
-        setGraphInputs(data || { domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, source: 'settings' })
+        setGraphInputs(data || { domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, existing_ports_count: 0, source: 'settings' })
         setLoadingInputs(false)
       })
       .catch(() => {
-        setGraphInputs({ domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, source: 'settings' })
+        setGraphInputs({ domain: targetDomain || null, existing_subdomains_count: 0, existing_ips_count: 0, existing_ports_count: 0, source: 'settings' })
         setLoadingInputs(false)
       })
   }, [isOpen, toolId, projectId, targetDomain])
 
   const domain = graphInputs?.domain || targetDomain || ''
-  const isNaabu = toolId === 'Naabu'
+  const isPortScanner = toolId === 'Naabu' || toolId === 'Masscan'
+  const isNmap = toolId === 'Nmap'
+  const hasUserInputs = isPortScanner || isNmap
+  const hasSubdomainInput = toolId === 'Naabu'
 
   // Subdomain validation
   const subdomainValidation = useMemo(
@@ -153,7 +176,15 @@ export function PartialReconModal({
     [customIps],
   )
 
-  const hasValidationErrors = subdomainValidation.errors.length > 0 || ipValidation.errors.length > 0
+  // Port validation (Nmap only)
+  const portValidation = useMemo(
+    () => validateLines(customPorts, validatePort),
+    [customPorts],
+  )
+
+  const hasValidationErrors = (hasSubdomainInput && subdomainValidation.errors.length > 0)
+    || ipValidation.errors.length > 0
+    || (isNmap && portValidation.errors.length > 0)
 
   // Build dropdown options: graph subdomains + custom subdomains (live)
   const attachToOptions = useMemo(() => {
@@ -184,36 +215,44 @@ export function PartialReconModal({
   const handleRun = useCallback(() => {
     if (!domain || hasValidationErrors) return
 
-    if (isNaabu) {
-      const subdomains = customSubdomains.split('\n').map(s => s.trim()).filter(Boolean)
+    if (hasUserInputs) {
+      const subdomains = hasSubdomainInput ? customSubdomains.split('\n').map(s => s.trim()).filter(Boolean) : []
       const ips = customIps.split('\n').map(s => s.trim()).filter(Boolean)
-      const userTargets: UserTargets | undefined = (subdomains.length || ips.length)
-        ? { subdomains, ips, ip_attach_to: ipAttachTo }
+      const ports = isNmap ? customPorts.split('\n').map(s => s.trim()).filter(Boolean).map(Number).filter(n => n >= 1 && n <= 65535) : []
+      const hasCustomInput = subdomains.length || ips.length || ports.length
+      const userTargets: UserTargets | undefined = hasCustomInput
+        ? { subdomains, ips, ip_attach_to: ipAttachTo, ...(ports.length ? { ports } : {}) }
         : undefined
 
-      onConfirm({
+      const params = {
         tool_id: toolId || '',
         graph_inputs: { domain },
         user_inputs: [],
         user_targets: userTargets,
-        dedup_enabled: true,
-      })
+        ...(includeGraphTargets ? {} : { include_graph_targets: false }),
+      }
+      console.log('[PartialReconModal] handleRun params:', JSON.stringify(params))
+      onConfirm(params)
     } else {
       onConfirm({
         tool_id: toolId || '',
         graph_inputs: { domain },
         user_inputs: [],
-        dedup_enabled: true,
+        ...(includeGraphTargets ? {} : { include_graph_targets: false }),
       })
     }
-  }, [domain, hasValidationErrors, isNaabu, toolId, onConfirm, customSubdomains, customIps, ipAttachTo])
+  }, [domain, hasValidationErrors, hasUserInputs, hasSubdomainInput, isNmap, toolId, onConfirm, customSubdomains, customIps, ipAttachTo, customPorts, includeGraphTargets])
 
   if (!isOpen || !toolId) return null
 
   const inputNodeTypes = SECTION_INPUT_MAP[toolId] || []
   const outputNodeTypes = SECTION_NODE_MAP[toolId] || []
-  const hasNoGraphTargets = isNaabu && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0
-  const hasNoCustomTargets = !customSubdomains.trim() && !customIps.trim()
+  const enrichNodeTypes = SECTION_ENRICH_MAP[toolId] || []
+  const hasNoGraphTargets = (isPortScanner && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0)
+    || (isNmap && !loadingInputs && (graphInputs?.existing_ports_count ?? 0) === 0)
+  const hasNoCustomTargets = (!hasSubdomainInput || !customSubdomains.trim()) && !customIps.trim() && !customPorts.trim()
+  const noTargetsToScan = hasUserInputs && !includeGraphTargets && hasNoCustomTargets
+  const nmapNoPorts = isNmap && !includeGraphTargets && !customPorts.trim()
 
   return (
     <Modal
@@ -238,17 +277,14 @@ export function PartialReconModal({
               {inputNodeTypes.map(nt => (
                 <span key={nt} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontWeight: 600 }}>{nt}</span>
               ))}
-              <span style={{
-                fontSize: '9px', padding: '1px 5px', borderRadius: '3px',
-                backgroundColor: graphInputs?.source === 'graph' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(234, 179, 8, 0.1)',
-                color: graphInputs?.source === 'graph' ? '#60a5fa' : '#facc15',
-              }}>
-                {loadingInputs ? '...' : graphInputs?.source === 'graph' ? 'graph' : 'settings'}
-              </span>
             </div>
             <div style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text-primary, #e2e8f0)' }}>
-              {loadingInputs ? 'Loading...' : isNaabu
+              {loadingInputs ? 'Loading...' : isNmap
+                ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs, ${graphInputs?.existing_ports_count ?? 0} ports, ${graphInputs?.existing_subdomains_count ?? 0} subdomains)`
+                : toolId === 'Naabu'
                 ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs, ${graphInputs?.existing_subdomains_count ?? 0} subdomains)`
+                : toolId === 'Masscan'
+                ? `${domain || 'No domain'} (${graphInputs?.existing_ips_count ?? 0} IPs)`
                 : domain || 'No domain configured'}
             </div>
           </div>
@@ -272,6 +308,18 @@ export function PartialReconModal({
                 <span key={nt} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', fontWeight: 600 }}>{nt}</span>
               ))}
             </div>
+            {enrichNodeTypes.length > 0 && (
+              <>
+                <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#4ade80', marginTop: '8px', marginBottom: '4px', opacity: 0.7 }}>
+                  Enriches
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {enrichNodeTypes.map(nt => (
+                    <span key={nt} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.08)', color: '#4ade80', fontWeight: 600, borderStyle: 'dashed', border: '1px dashed rgba(34, 197, 94, 0.3)' }}>{nt}</span>
+                  ))}
+                </div>
+              </>
+            )}
             <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '6px' }}>
               New nodes merged into graph
             </div>
@@ -283,18 +331,51 @@ export function PartialReconModal({
           {TOOL_DESCRIPTIONS[toolId] || 'Runs this pipeline phase independently and merges results into the existing graph.'}
         </div>
 
-        {/* Naabu: no targets warning */}
-        {hasNoGraphTargets && hasNoCustomTargets && (
+        {/* Include graph targets checkbox */}
+        {hasUserInputs && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeGraphTargets}
+              onChange={e => setIncludeGraphTargets(e.target.checked)}
+              style={{ accentColor: '#3b82f6' }}
+            />
+            <span style={{ fontSize: '12px', color: 'var(--text-primary, #e2e8f0)' }}>
+              Include existing graph targets in scan
+            </span>
+          </label>
+        )}
+
+        {/* No targets warning */}
+        {hasNoGraphTargets && includeGraphTargets && hasNoCustomTargets && (
           <div style={{
             fontSize: '11px', color: '#facc15', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
             backgroundColor: 'rgba(234, 179, 8, 0.08)', border: '1px solid rgba(234, 179, 8, 0.2)',
           }}>
-            No IPs found in graph. Run Subdomain Discovery first to populate the graph, or provide custom targets below.
+            {isNmap
+              ? 'No ports found in graph. Run Naabu first to discover open ports, or provide custom targets below.'
+              : 'No IPs found in graph. Run Subdomain Discovery first to populate the graph, or provide custom targets below.'}
+          </div>
+        )}
+        {noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Provide custom targets below or enable graph targets to run the scan.
+          </div>
+        )}
+        {nmapNoPorts && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Nmap requires ports to scan. Provide custom ports below or enable graph targets (which include existing ports from Naabu/Masscan).
           </div>
         )}
 
-        {/* === Naabu: Section A - Custom Subdomains === */}
-        {isNaabu && (
+        {/* === Section A - Custom Subdomains (only for tools that consume Subdomain) === */}
+        {hasSubdomainInput && (
           <div>
             <div style={labelStyle}>Custom subdomains (optional, one per line)</div>
             <textarea
@@ -316,8 +397,8 @@ export function PartialReconModal({
           </div>
         )}
 
-        {/* === Naabu: Section B - Custom IPs === */}
-        {isNaabu && (
+        {/* === Section B - Custom IPs === */}
+        {hasUserInputs && (
           <div>
             <div style={labelStyle}>Custom IPs (optional, one per line)</div>
             <textarea
@@ -334,7 +415,9 @@ export function PartialReconModal({
                 ))}
               </div>
             ) : (
-              <div style={hintStyle}>IPv4, IPv6, or CIDR ranges (/24-/32)</div>
+              <div style={hintStyle}>{isNmap
+                ? 'IPv4, IPv6, or CIDR ranges (/24-/32). Will be scanned on all ports (graph + custom).'
+                : 'IPv4, IPv6, or CIDR ranges (/24-/32)'}</div>
             )}
 
             {/* Dropdown: associate IPs to subdomain */}
@@ -367,6 +450,29 @@ export function PartialReconModal({
                     : 'IPs will be tracked via a UserInput node (no subdomain link)'}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* === Section C - Custom Ports (Nmap only) === */}
+        {isNmap && (
+          <div>
+            <div style={labelStyle}>Custom ports (optional, one per line)</div>
+            <textarea
+              value={customPorts}
+              onChange={e => setCustomPorts(e.target.value)}
+              placeholder={'8443\n9090\n3000'}
+              rows={2}
+              style={textareaStyle(portValidation.errors.length > 0)}
+            />
+            {portValidation.errors.length > 0 ? (
+              <div style={errorListStyle}>
+                {portValidation.errors.map((err, i) => (
+                  <div key={i} style={errorLineStyle}>Line {err.line}: {err.error}</div>
+                ))}
+              </div>
+            ) : (
+              <div style={hintStyle}>Port numbers 1-65535. Scanned on all target IPs (graph + custom).</div>
             )}
           </div>
         )}
@@ -405,14 +511,14 @@ export function PartialReconModal({
           <button
             type="button"
             onClick={handleRun}
-            disabled={!domain || isStarting || hasValidationErrors}
+            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts}
             style={{
               padding: '8px 16px', borderRadius: '6px', border: 'none',
               backgroundColor: '#3b82f6', color: '#fff',
-              cursor: !domain || isStarting || hasValidationErrors ? 'not-allowed' : 'pointer',
+              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               display: 'flex', alignItems: 'center', gap: '6px',
-              opacity: !domain || isStarting || hasValidationErrors ? 0.5 : 1,
+              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts ? 0.5 : 1,
             }}
           >
             {isStarting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}

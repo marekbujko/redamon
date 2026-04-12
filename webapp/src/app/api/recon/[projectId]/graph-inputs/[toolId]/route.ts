@@ -50,7 +50,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    else if (toolId === 'Naabu') {
+    else if (toolId === 'Naabu' || toolId === 'Masscan') {
       try {
         const session = getSession()
         try {
@@ -82,7 +82,46 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           await session.close()
         }
       } catch (err) {
-        console.warn('Neo4j query failed for Naabu graph-inputs, falling back to settings:', err)
+        console.warn(`Neo4j query failed for ${toolId} graph-inputs, falling back to settings:`, err)
+      }
+    }
+
+    else if (toolId === 'Nmap') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             OPTIONAL MATCH (d)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(i:IP)-[:HAS_PORT]->(p:Port)
+             OPTIONAL MATCH (d)-[:RESOLVES_TO]->(di:IP)-[:HAS_PORT]->(dp:Port)
+             WITH d, collect(DISTINCT s.name) AS subdomains,
+                  count(DISTINCT i) + count(DISTINCT di) AS ipCount,
+                  count(DISTINCT p) + count(DISTINCT dp) AS portCount
+             RETURN d.name AS domain, subdomains, size(subdomains) AS subCount, ipCount, portCount`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const subdomains: string[] = record?.get('subdomains') || []
+          const subCount = record?.get('subCount')?.toNumber?.() ?? record?.get('subCount') ?? 0
+          const ipCount = record?.get('ipCount')?.toNumber?.() ?? record?.get('ipCount') ?? 0
+          const portCount = record?.get('portCount')?.toNumber?.() ?? record?.get('portCount') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_subdomains: subdomains,
+              existing_subdomains_count: subCount,
+              existing_ips_count: ipCount,
+              existing_ports_count: portCount,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for Nmap graph-inputs, falling back to settings:', err)
       }
     }
 
@@ -91,6 +130,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       domain: project.targetDomain || null,
       existing_subdomains_count: 0,
       existing_ips_count: 0,
+      existing_ports_count: 0,
       source: 'settings',
     })
 

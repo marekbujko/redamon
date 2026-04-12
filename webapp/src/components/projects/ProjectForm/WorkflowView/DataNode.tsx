@@ -12,6 +12,7 @@ interface DataNodeData {
   color: string
   producers: string[]
   consumers: string[]
+  enrichers: string[]
   onNodeClick?: (nodeId: string) => void
   highlighted?: boolean
   dimmed?: boolean
@@ -20,10 +21,11 @@ interface DataNodeData {
 }
 
 function DataNodeComponent({ data }: NodeProps) {
-  const { nodeType, isUniversal, status, color, producers, consumers, onNodeClick, highlighted, dimmed, nodeCount, onBadgeClick } = data as unknown as DataNodeData
+  const { nodeType, isUniversal, status, color, producers, consumers, enrichers, onNodeClick, highlighted, dimmed, nodeCount, onBadgeClick } = data as unknown as DataNodeData
 
   const tooltipLines = []
   if (producers.length > 0) tooltipLines.push(`Produced by: ${producers.join(', ')}`)
+  if (enrichers?.length > 0) tooltipLines.push(`Enriched by: ${enrichers.join(', ')}`)
   if (consumers.length > 0) tooltipLines.push(`Consumed by: ${consumers.join(', ')}`)
   const tooltip = tooltipLines.join('\n')
 

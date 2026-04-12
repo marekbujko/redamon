@@ -26,14 +26,14 @@ export const SECTION_INPUT_MAP: Record<string, string[]> = {
 }
 
 export const SECTION_NODE_MAP: Record<string, string[]> = {
-  SubdomainDiscovery: ['Domain', 'Subdomain', 'IP', 'DNSRecord', 'ExternalDomain'],
-  Shodan:             ['IP', 'Port', 'Service', 'Subdomain', 'ExternalDomain', 'DNSRecord', 'Technology', 'Vulnerability', 'CVE'],
-  Urlscan:            ['Domain', 'Subdomain', 'ExternalDomain', 'IP', 'Endpoint', 'Parameter'],
-  OsintEnrichment:    ['IP', 'Domain', 'Subdomain', 'Port', 'Service', 'ExternalDomain', 'DNSRecord', 'Technology', 'ThreatPulse', 'Malware', 'Certificate', 'Vulnerability', 'CVE'],
+  SubdomainDiscovery: ['Subdomain', 'IP', 'DNSRecord', 'ExternalDomain'],
+  Shodan:             ['Port', 'Service', 'Subdomain', 'ExternalDomain', 'DNSRecord', 'Vulnerability', 'CVE'],
+  Urlscan:            ['Subdomain', 'ExternalDomain', 'Endpoint', 'Parameter'],
+  OsintEnrichment:    ['Subdomain', 'Port', 'Service', 'ExternalDomain', 'DNSRecord', 'ThreatPulse', 'Malware', 'Certificate', 'Vulnerability', 'CVE'],
   Naabu:              ['Port', 'Service'],
   Masscan:            ['Port', 'Service'],
-  Nmap:               ['Port', 'Service', 'Technology', 'Vulnerability', 'CVE'],
-  Httpx:              ['BaseURL', 'Certificate', 'Technology', 'Header', 'ExternalDomain'],
+  Nmap:               ['Technology', 'Vulnerability', 'CVE'],
+  Httpx:              ['BaseURL', 'Certificate', 'Technology', 'Header'],
   Katana:             ['Endpoint', 'Parameter', 'BaseURL', 'ExternalDomain'],
   Hakrawler:          ['Endpoint', 'Parameter', 'BaseURL', 'ExternalDomain'],
   Jsluice:            ['Endpoint', 'Parameter', 'BaseURL', 'Secret', 'ExternalDomain'],
@@ -41,13 +41,25 @@ export const SECTION_NODE_MAP: Record<string, string[]> = {
   Gau:                ['Endpoint', 'Parameter', 'BaseURL', 'ExternalDomain'],
   ParamSpider:        ['Endpoint', 'Parameter', 'BaseURL', 'ExternalDomain'],
   Kiterunner:         ['Endpoint', 'BaseURL'],
-  Arjun:              ['Parameter', 'ExternalDomain'],
+  Arjun:              ['Parameter'],
   Nuclei:             ['Vulnerability', 'Endpoint', 'Parameter', 'CVE', 'MitreData', 'Capec'],
   CveLookup:          ['CVE', 'MitreData', 'Capec'],
   GvmScan:            ['Vulnerability', 'Technology', 'Traceroute', 'Certificate', 'ExploitGvm', 'CVE', 'MitreData', 'Capec'],
   Github:             ['GithubHunt', 'GithubRepository', 'GithubPath', 'GithubSecret', 'GithubSensitiveFile'],
   SecurityChecks:     ['Vulnerability'],
   Uncover:            ['IP', 'Subdomain', 'Port', 'Endpoint'],
-  JsRecon:            ['Secret', 'Endpoint', 'Parameter', 'Subdomain', 'ExternalDomain', 'Technology'],
+  JsRecon:            ['Secret', 'Endpoint'],
   Mitre:              ['MitreData', 'Capec'],
+}
+
+export const SECTION_ENRICH_MAP: Record<string, string[]> = {
+  SubdomainDiscovery: ['Domain'],
+  Shodan:             ['IP'],
+  Urlscan:            ['Domain', 'IP', 'BaseURL'],
+  OsintEnrichment:    ['IP', 'Domain'],
+  Naabu:              ['IP', 'Domain'],
+  Masscan:            ['IP', 'Domain'],
+  Nmap:               ['Port', 'Service'],
+  Httpx:              ['Subdomain', 'Domain'],
+  SecurityChecks:     ['IP'],
 }

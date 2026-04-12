@@ -6,10 +6,11 @@ import {
   TRANSITIONAL_DATA_NODES,
   ALL_WORKFLOW_DATA_NODES,
   DATA_NODE_CATEGORIES,
-  CATEGORY_COLORS,
   getGroupColor,
   getToolProduces,
   getToolConsumes,
+  getToolEnriches,
+  getNodeColor,
 } from './workflowDefinition'
 import {
   computeLayout,
@@ -78,6 +79,9 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
       for (const nt of getToolConsumes(tool.id)) {
         if (ALL_WORKFLOW_DATA_NODES.has(nt)) connectedDataNodes.add(nt)
       }
+      for (const nt of getToolEnriches(tool.id)) {
+        if (ALL_WORKFLOW_DATA_NODES.has(nt)) connectedDataNodes.add(nt)
+      }
     }
 
     // ---- 4. Build layout descriptors ----
@@ -113,11 +117,12 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
     const posMap = new Map(positions.map(p => [p.id, { x: p.x, y: p.y }]))
 
     // ---- 6. Build edges ----
-    const edgeEntries: { source: string; target: string }[] = []
+    type EdgeEntry = { source: string; target: string; edgeType: 'normal' | 'enrich' }
+    const edgeEntries: EdgeEntry[] = []
 
     // Input --> universal data nodes
     for (const nt of INPUT_PRODUCES) {
-      edgeEntries.push({ source: 'input', target: `data-${nt}` })
+      edgeEntries.push({ source: 'input', target: `data-${nt}`, edgeType: 'normal' })
     }
 
     // Universal data nodes --> consuming tools
@@ -125,19 +130,25 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
       if (!connectedDataNodes.has(nt)) continue
       for (const tool of WORKFLOW_TOOLS) {
         if (getToolConsumes(tool.id).includes(nt)) {
-          edgeEntries.push({ source: `data-${nt}`, target: `tool-${tool.id}` })
+          edgeEntries.push({ source: `data-${nt}`, target: `tool-${tool.id}`, edgeType: 'normal' })
         }
       }
     }
 
     // Tool --> data node (produces) -- both transitional AND universal
-    // Tools that produce universal types (e.g. SubdomainDiscovery produces
-    // Subdomain, OSINT Enrichment produces IP) get output edges to those
-    // data nodes, showing they contribute new data.
     for (const tool of WORKFLOW_TOOLS) {
       for (const nt of getToolProduces(tool.id)) {
         if (connectedDataNodes.has(nt)) {
-          edgeEntries.push({ source: `tool-${tool.id}`, target: `data-${nt}` })
+          edgeEntries.push({ source: `tool-${tool.id}`, target: `data-${nt}`, edgeType: 'normal' })
+        }
+      }
+    }
+
+    // Tool --> data node (enriches) -- dotted edges
+    for (const tool of WORKFLOW_TOOLS) {
+      for (const nt of getToolEnriches(tool.id)) {
+        if (connectedDataNodes.has(nt)) {
+          edgeEntries.push({ source: `tool-${tool.id}`, target: `data-${nt}`, edgeType: 'enrich' })
         }
       }
     }
@@ -147,17 +158,24 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
       if (!connectedDataNodes.has(nt)) continue
       for (const tool of WORKFLOW_TOOLS) {
         if (getToolConsumes(tool.id).includes(nt)) {
-          edgeEntries.push({ source: `data-${nt}`, target: `tool-${tool.id}` })
+          edgeEntries.push({ source: `data-${nt}`, target: `tool-${tool.id}`, edgeType: 'normal' })
         }
       }
     }
 
-    // Deduplicate edges
-    const edgeSet = new Set(edgeEntries.map(e => `${e.source}|${e.target}`))
-    const uniqueEdges = [...edgeSet].map(key => {
-      const [source, target] = key.split('|')
-      return { source, target }
-    })
+    // Deduplicate edges (keep edgeType -- enrich takes precedence if both exist for same pair)
+    const edgeMap = new Map<string, EdgeEntry>()
+    for (const e of edgeEntries) {
+      const key = `${e.source}|${e.target}`
+      const existing = edgeMap.get(key)
+      if (!existing) {
+        edgeMap.set(key, e)
+      } else if (existing.edgeType === 'enrich' && e.edgeType === 'normal') {
+        // normal takes precedence (it's a stronger relationship)
+        edgeMap.set(key, e)
+      }
+    }
+    const uniqueEdges = [...edgeMap.values()]
 
     // ---- 7. Build React Flow nodes ----
     const rfNodes: Node[] = []
@@ -204,13 +222,14 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
       const isUniversal = UNIVERSAL_DATA_NODES.has(nodeType)
       const status = dataNodeStatus.get(nodeType) ?? 'active'
       const category = DATA_NODE_CATEGORIES[nodeType] ?? 'identity'
-      const color = CATEGORY_COLORS[category]
+      const color = getNodeColor(nodeType)
 
-      // Compute producer/consumer lists for tooltip
+      // Compute producer/consumer/enricher lists for tooltip
       const producers = isUniversal
         ? ['Input']
         : WORKFLOW_TOOLS.filter(t => getToolProduces(t.id).includes(nodeType)).map(t => t.label)
       const consumers = WORKFLOW_TOOLS.filter(t => getToolConsumes(t.id).includes(nodeType)).map(t => t.label)
+      const enrichers = WORKFLOW_TOOLS.filter(t => getToolEnriches(t.id).includes(nodeType)).map(t => t.label)
 
       rfNodes.push({
         id: `data-${nodeType}`,
@@ -224,6 +243,7 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
           color,
           producers,
           consumers,
+          enrichers,
         },
         draggable: false,
         selectable: false,
@@ -231,30 +251,29 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
     }
 
     // ---- 8. Build React Flow edges ----
-    // All edges are dashed. Animated dashes show direction when the
-    // producing tool is enabled (data flows from tool to data node,
-    // and from data node to consuming tool).
+    // Normal edges are dashed (6 3). Enrich edges are dotted (2 4).
+    // Animated dashes show direction when the producing tool is enabled.
     const rfEdges: Edge[] = uniqueEdges.map((edge, i) => {
       const sourceIsData = edge.source.startsWith('data-')
       const targetIsData = edge.target.startsWith('data-')
+      const isEnrich = edge.edgeType === 'enrich'
 
       let animated = false
       let strokeColor = '#4b5563'
       let strokeOpacity = 0.6
-      const strokeDasharray = '6 3'
+      const strokeDasharray = isEnrich ? '2 4' : '6 3'
+      const strokeWidth = isEnrich ? 1.2 : 1.5
 
       if (sourceIsData) {
         // data --> tool (input edge)
         const dataType = edge.source.replace('data-', '')
         const status = dataNodeStatus.get(dataType)
-        const category = DATA_NODE_CATEGORIES[dataType]
 
         if (status === 'starved') {
           strokeColor = '#ef4444'
           strokeOpacity = 0.4
         } else {
-          strokeColor = CATEGORY_COLORS[category] ?? '#22c55e'
-          // Animate if the consuming tool is enabled
+          strokeColor = getNodeColor(dataType)
           const toolId = edge.target.replace('tool-', '')
           const tool = WORKFLOW_TOOLS.find(t => t.id === toolId)
           const toolEnabled = tool ? !!formData[tool.enabledField] : false
@@ -262,22 +281,26 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
           strokeOpacity = toolEnabled ? 0.5 : 0.15
         }
       } else if (targetIsData) {
-        // tool/input --> data (output edge)
+        // tool/input --> data (output/enrich edge)
         const dataType = edge.target.replace('data-', '')
-        const category = DATA_NODE_CATEGORIES[dataType]
+        const nodeColor = getNodeColor(dataType)
 
         if (edge.source === 'input') {
-          strokeColor = CATEGORY_COLORS[category] ?? '#3b82f6'
+          strokeColor = nodeColor
           strokeOpacity = 0.4
           animated = true
         } else {
           const toolId = edge.source.replace('tool-', '')
           const tool = WORKFLOW_TOOLS.find(t => t.id === toolId)
           const enabled = tool ? !!formData[tool.enabledField] : false
-          strokeColor = enabled
-            ? (CATEGORY_COLORS[category] ?? '#22c55e')
-            : '#4b5563'
-          strokeOpacity = enabled ? 0.5 : 0.15
+
+          if (isEnrich) {
+            strokeColor = enabled ? nodeColor : '#4b5563'
+            strokeOpacity = enabled ? 0.45 : 0.12
+          } else {
+            strokeColor = enabled ? nodeColor : '#4b5563'
+            strokeOpacity = enabled ? 0.5 : 0.15
+          }
           animated = enabled
         }
       }
@@ -287,10 +310,11 @@ export function useWorkflowGraph(formData: Record<string, unknown>) {
         source: edge.source,
         target: edge.target,
         type: 'custom',
-        animated,
+        animated: false,
+        data: { shouldAnimate: animated, isEnrich },
         style: {
           stroke: strokeColor,
-          strokeWidth: 1.5,
+          strokeWidth,
           strokeDasharray,
           opacity: strokeOpacity,
         },

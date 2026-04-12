@@ -1037,7 +1037,6 @@ User-provided values for partial recon runs. When a user triggers a partial reco
 | `input_type` | String | Type of input: "subdomains", "ips", "urls", "domains" |
 | `values` | String[] | User-provided values |
 | `tool_id` | String | Tool that was run (e.g., "SubdomainDiscovery") |
-| `dedup_enabled` | Boolean | Whether deduplication was enabled for this run |
 | `source` | String | Always "user" |
 | `status` | String | "running", "completed", "error" |
 | `stats` | String | JSON-encoded run statistics |

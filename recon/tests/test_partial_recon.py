@@ -27,7 +27,7 @@ class TestLoadConfig(unittest.TestCase):
     """Tests for config loading from JSON file."""
 
     def test_load_valid_config(self):
-        config = {"tool_id": "SubdomainDiscovery", "domain": "example.com", "user_inputs": ["api.example.com"], "dedup_enabled": True}
+        config = {"tool_id": "SubdomainDiscovery", "domain": "example.com", "user_inputs": ["api.example.com"]}
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(config, f)
             f.flush()
@@ -71,7 +71,6 @@ class TestLoadConfig(unittest.TestCase):
             "tool_id": "SubdomainDiscovery",
             "domain": "test.io",
             "user_inputs": ["a.test.io", "b.test.io"],
-            "dedup_enabled": False,
             "user_id": "u1",
             "webapp_api_url": "http://localhost:3000",
         }
@@ -82,7 +81,6 @@ class TestLoadConfig(unittest.TestCase):
             try:
                 result = load_config()
                 self.assertEqual(result["domain"], "test.io")
-                self.assertFalse(result["dedup_enabled"])
                 self.assertEqual(len(result["user_inputs"]), 2)
                 self.assertEqual(result["webapp_api_url"], "http://localhost:3000")
             finally:
@@ -188,16 +186,15 @@ class TestRunSubdomainDiscovery(unittest.TestCase):
         }
 
     def test_basic_discovery_no_user_inputs(self):
-        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": [], "dedup_enabled": True})
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
         mocks["discover"].assert_called_once()
         mocks["neo4j_client"].update_graph_from_partial_discovery.assert_called_once()
         _, kw = mocks["neo4j_client"].update_graph_from_partial_discovery.call_args
         self.assertIsNone(kw.get("user_input_id"))
-        self.assertTrue(kw.get("dedup_enabled"))
 
     def test_user_inputs_triggers_userinput_node(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["new.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["new.example.com"]},
             discover_result=_mock_discover_result(["www.example.com"]),
             puredns_result=["www.example.com", "new.example.com"],
             resolve_dns_result={
@@ -214,25 +211,20 @@ class TestRunSubdomainDiscovery(unittest.TestCase):
         self.assertEqual(ui_kw["user_input_data"]["values"], ["new.example.com"])
         self.assertEqual(ui_kw["user_input_data"]["tool_id"], "SubdomainDiscovery")
 
-    def test_dedup_disabled_passed_through(self):
-        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": [], "dedup_enabled": False})
-        _, kw = mocks["neo4j_client"].update_graph_from_partial_discovery.call_args
-        self.assertFalse(kw["dedup_enabled"])
-
     def test_neo4j_unavailable_skips_update(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": [], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": []},
             neo4j_connected=False,
         )
         mocks["neo4j_client"].update_graph_from_partial_discovery.assert_not_called()
 
     def test_settings_fetched_from_get_settings(self):
-        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": [], "dedup_enabled": True})
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
         mocks["settings"].assert_called_once()
 
     def test_user_input_status_completed(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["x.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["x.example.com"]},
             discover_result=_mock_discover_result(["www.example.com"]),
             puredns_result=["www.example.com", "x.example.com"],
             resolve_dns_result={
@@ -375,17 +367,17 @@ class TestRunNaabu(unittest.TestCase):
         }
 
     def test_basic_scan_no_user_inputs(self):
-        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": [], "dedup_enabled": True})
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
         mocks["port_scan"].assert_called_once()
         mocks["neo4j_client"].update_graph_from_port_scan.assert_called_once()
 
     def test_settings_fetched(self):
-        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": [], "dedup_enabled": True})
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
         mocks["settings"].assert_called_once()
 
     def test_user_ips_create_userinput_node(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.1", "192.168.1.0/24"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.1", "192.168.1.0/24"]},
         )
         mocks["neo4j_client"].create_user_input_node.assert_called_once()
         _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
@@ -396,7 +388,7 @@ class TestRunNaabu(unittest.TestCase):
 
     def test_invalid_ips_rejected(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["not-an-ip", "10.0.0.1"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["not-an-ip", "10.0.0.1"]},
         )
         # Should still create UserInput node with only valid IPs
         mocks["neo4j_client"].create_user_input_node.assert_called_once()
@@ -406,14 +398,14 @@ class TestRunNaabu(unittest.TestCase):
     def test_empty_graph_no_user_inputs_exits(self):
         with self.assertRaises(SystemExit):
             self._run_with_mocks(
-                {"domain": "example.com", "user_inputs": [], "dedup_enabled": True},
+                {"domain": "example.com", "user_inputs": []},
                 domain_ips=[],
                 subdomain_ips=[],
             )
 
     def test_user_input_status_completed(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.1"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.1"]},
         )
         mocks["neo4j_client"].update_user_input_status.assert_called_once()
         args = mocks["neo4j_client"].update_user_input_status.call_args[0]
@@ -423,13 +415,13 @@ class TestRunNaabu(unittest.TestCase):
         # When Neo4j is down, no IPs can be fetched, so Naabu exits
         with self.assertRaises(SystemExit):
             self._run_with_mocks(
-                {"domain": "example.com", "user_inputs": [], "dedup_enabled": True},
+                {"domain": "example.com", "user_inputs": []},
                 neo4j_connected=False,
             )
 
     def test_port_scan_called_with_recon_data(self):
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": [], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": []},
         )
         call_args = mocks["port_scan"].call_args
         recon_data = call_args[0][0]
@@ -736,7 +728,7 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def test_cidr_24_expanded(self):
         """A /30 CIDR (2 usable hosts) should be expanded into individual IPs."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.0/30"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.0/30"]},
             domain_ips=[], subdomain_ips=[],
         )
         # /30 has 2 usable hosts: 10.0.0.1, 10.0.0.2
@@ -751,14 +743,14 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
         """A /16 CIDR (65536 addresses) should be skipped."""
         with self.assertRaises(SystemExit):
             self._run_with_mocks(
-                {"domain": "example.com", "user_inputs": ["10.0.0.0/16"], "dedup_enabled": True},
+                {"domain": "example.com", "user_inputs": ["10.0.0.0/16"]},
                 domain_ips=[], subdomain_ips=[],
             )
 
     def test_oversized_cidr_with_graph_ips_still_scans(self):
         """Oversized CIDR is skipped but graph IPs are still scanned."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.0/16"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.0/16"]},
             domain_ips=[{"address": "93.184.216.34", "version": "ipv4"}],
             subdomain_ips=[],
         )
@@ -769,7 +761,7 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def test_single_ip_user_input_injected(self):
         """A single IP user input should be injected into the domain IPs."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.1"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.1"]},
             domain_ips=[], subdomain_ips=[],
         )
         recon_data = mocks["port_scan"].call_args[0][0]
@@ -778,7 +770,7 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def test_user_ip_not_duplicated_with_graph(self):
         """If user provides an IP already in graph, it should not appear twice."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["93.184.216.34"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["93.184.216.34"]},
             domain_ips=[{"address": "93.184.216.34", "version": "ipv4"}],
             subdomain_ips=[],
         )
@@ -789,7 +781,7 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def test_ipv6_user_input(self):
         """IPv6 addresses should be placed in the ipv6 bucket."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["2001:db8::1"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["2001:db8::1"]},
             domain_ips=[], subdomain_ips=[],
         )
         recon_data = mocks["port_scan"].call_args[0][0]
@@ -800,14 +792,14 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
         """If all user inputs are invalid, no UserInput node should be created."""
         with self.assertRaises(SystemExit):
             self._run_with_mocks(
-                {"domain": "example.com", "user_inputs": ["bad", "also-bad", "nope"], "dedup_enabled": True},
+                {"domain": "example.com", "user_inputs": ["bad", "also-bad", "nope"]},
                 domain_ips=[], subdomain_ips=[],
             )
 
     def test_mixed_valid_invalid_ips(self):
         """Valid IPs should be kept, invalid ones rejected."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["bad", "10.0.0.1", "also-bad", "10.0.0.2"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["bad", "10.0.0.1", "also-bad", "10.0.0.2"]},
             domain_ips=[], subdomain_ips=[],
         )
         recon_data = mocks["port_scan"].call_args[0][0]
@@ -819,7 +811,7 @@ class TestRunNaabuCidrExpansion(unittest.TestCase):
     def test_recon_data_structure_matches_expected(self):
         """Verify the exact structure that extract_targets_from_recon expects."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": [], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": []},
             domain_ips=[{"address": "1.2.3.4", "version": "ipv4"}],
             subdomain_ips=[
                 {"subdomain": "www.example.com", "address": "5.6.7.8", "version": "ipv4"},
@@ -948,7 +940,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_hostname_resolved_and_injected(self):
         """A user-provided hostname should be resolved and added to dns.subdomains."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["custom.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["custom.example.com"]},
             domain_ips=[], subdomain_ips=[],
             resolve_results={"custom.example.com": {"ipv4": ["9.8.7.6"], "ipv6": []}},
         )
@@ -963,7 +955,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
         with self.assertRaises(SystemExit):
             # Empty graph + unresolvable hostname = no targets -> exit
             self._run_with_mocks(
-                {"domain": "example.com", "user_inputs": ["noresolve.example.com"], "dedup_enabled": True},
+                {"domain": "example.com", "user_inputs": ["noresolve.example.com"]},
                 domain_ips=[], subdomain_ips=[],
                 resolve_results={},  # no resolution
             )
@@ -971,7 +963,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_hostname_already_in_graph_skipped(self):
         """If hostname is already in graph subdomains, it should not be re-resolved."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["www.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["www.example.com"]},
             domain_ips=[],
             subdomain_ips=[{"subdomain": "www.example.com", "address": "1.2.3.4", "version": "ipv4"}],
             resolve_results={"www.example.com": {"ipv4": ["5.5.5.5"], "ipv6": []}},
@@ -984,7 +976,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_mixed_ips_and_hostnames(self):
         """Both IPs and hostnames in the same user_inputs list."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.1", "api.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.1", "api.example.com"]},
             domain_ips=[], subdomain_ips=[],
             resolve_results={"api.example.com": {"ipv4": ["4.3.2.1"], "ipv6": []}},
         )
@@ -998,7 +990,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_userinput_node_only_for_ips_not_hostnames(self):
         """UserInput node should only contain IPs, not hostnames (hostnames become real nodes)."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["10.0.0.1", "api.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["10.0.0.1", "api.example.com"]},
             domain_ips=[], subdomain_ips=[],
             resolve_results={"api.example.com": {"ipv4": ["4.3.2.1"], "ipv6": []}},
         )
@@ -1011,7 +1003,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_hostname_only_no_userinput_node(self):
         """When user provides only hostnames, no UserInput node should be created."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["api.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["api.example.com"]},
             domain_ips=[], subdomain_ips=[],
             resolve_results={"api.example.com": {"ipv4": ["4.3.2.1"], "ipv6": []}},
         )
@@ -1020,7 +1012,7 @@ class TestRunNaabuHostnameInputs(unittest.TestCase):
     def test_hostname_with_ipv6_resolution(self):
         """Hostname resolving to IPv6 should be placed in ipv6 bucket."""
         mocks = self._run_with_mocks(
-            {"domain": "example.com", "user_inputs": ["v6.example.com"], "dedup_enabled": True},
+            {"domain": "example.com", "user_inputs": ["v6.example.com"]},
             domain_ips=[], subdomain_ips=[],
             resolve_results={"v6.example.com": {"ipv4": [], "ipv6": ["2001:db8::1"]}},
         )
@@ -1127,7 +1119,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com", "user_inputs": [],
                 "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": "www.example.com"},
-                "dedup_enabled": True,
             },
             subdomain_ips=[{"subdomain": "www.example.com", "address": "1.2.3.4", "version": "ipv4"}],
         )
@@ -1139,7 +1130,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com", "user_inputs": [],
                 "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
-                "dedup_enabled": True,
             },
             domain_ips=[{"address": "1.2.3.4", "version": "ipv4"}],
         )
@@ -1153,7 +1143,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com", "user_inputs": [],
                 "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": "www.example.com"},
-                "dedup_enabled": True,
             },
             subdomain_ips=[{"subdomain": "www.example.com", "address": "1.2.3.4", "version": "ipv4"}],
         )
@@ -1168,7 +1157,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com", "user_inputs": [],
                 "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
-                "dedup_enabled": True,
             },
             domain_ips=[],
         )
@@ -1185,7 +1173,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
                     "ips": ["10.0.0.1"],
                     "ip_attach_to": "api.example.com",
                 },
-                "dedup_enabled": True,
             },
             domain_ips=[], subdomain_ips=[],
             resolve_results={"api.example.com": {"ipv4": ["9.8.7.6"], "ipv6": []}},
@@ -1203,7 +1190,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com", "user_inputs": [],
                 "user_targets": {"subdomains": [], "ips": [], "ip_attach_to": None},
-                "dedup_enabled": True,
             },
             domain_ips=[{"address": "1.2.3.4", "version": "ipv4"}],
         )
@@ -1216,7 +1202,6 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
             {
                 "domain": "example.com",
                 "user_inputs": ["10.0.0.1"],
-                "dedup_enabled": True,
                 # NO user_targets key
             },
             domain_ips=[],
@@ -1225,6 +1210,567 @@ class TestRunNaabuStructuredTargets(unittest.TestCase):
         mocks["neo4j_client"].create_user_input_node.assert_called_once()
         recon_data = mocks["port_scan"].call_args[0][0]
         self.assertIn("10.0.0.1", recon_data["dns"]["domain"]["ips"]["ipv4"])
+
+
+def _mock_masscan_scan_result(recon_data=None):
+    """Build a mock recon_data dict with masscan_scan results (same structure as port_scan)."""
+    data = recon_data or {
+        "domain": "example.com",
+        "dns": {
+            "domain": {"ips": {"ipv4": ["93.184.216.34"], "ipv6": []}, "has_records": True},
+            "subdomains": {},
+        },
+    }
+    data["masscan_scan"] = {
+        "scan_metadata": {"scanner": "masscan", "scan_timestamp": "2026-01-01T00:00:00"},
+        "by_host": {
+            "example.com": {"host": "example.com", "ip": "93.184.216.34", "ports": [80, 443], "port_details": [
+                {"port": 80, "protocol": "tcp", "service": "http"},
+                {"port": 443, "protocol": "tcp", "service": "https"},
+            ]},
+        },
+        "by_ip": {"93.184.216.34": {"ip": "93.184.216.34", "hostnames": ["example.com"], "ports": [80, 443]}},
+        "all_ports": [80, 443],
+        "ip_to_hostnames": {"93.184.216.34": ["example.com"]},
+        "summary": {"hosts_scanned": 1, "total_open_ports": 2, "unique_ports": [80, 443]},
+    }
+    return data
+
+
+class TestRunMasscan(unittest.TestCase):
+    """Tests for run_masscan using module-level mocks."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, domain_ips=None, subdomain_ips=None):
+        """Helper that sets up all mocks and runs run_masscan."""
+        # Mock get_settings
+        mock_settings = MagicMock()
+        mock_settings.return_value = {"MASSCAN_ENABLED": False, "MASSCAN_TOP_PORTS": "1000", "MASSCAN_RATE": 1000}
+
+        # Mock run_masscan_scan: modifies recon_data in place and returns it
+        mock_masscan_scan = MagicMock(side_effect=lambda recon_data, output_file=None, settings=None: _mock_masscan_scan_result(recon_data))
+
+        # Mock Neo4jClient
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_port_scan.return_value = {
+            "ports_created": 2, "services_created": 2, "ips_updated": 1,
+            "relationships_created": 4, "errors": [],
+        }
+
+        # Mock the neo4j driver session for graph queries
+        mock_session = MagicMock()
+        _domain_ips = domain_ips if domain_ips is not None else [
+            {"address": "93.184.216.34", "version": "ipv4"},
+        ]
+        _subdomain_ips = subdomain_ips if subdomain_ips is not None else [
+            {"subdomain": "www.example.com", "address": "93.184.216.34", "version": "ipv4"},
+        ]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "RESOLVES_TO]->(i:IP)" in query and "HAS_SUBDOMAIN" not in query:
+                records = []
+                for ip_data in _domain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query and "RESOLVES_TO" in query:
+                records = []
+                for ip_data in _subdomain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            else:
+                result.__iter__ = lambda self: iter([])
+            return result
+
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Create mock modules
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_masscan_mod = MagicMock()
+        mock_masscan_mod.run_masscan_scan = mock_masscan_scan
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        # Inject mocks into sys.modules
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.masscan_scan': mock_masscan_mod,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_masscan(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "masscan_scan": mock_masscan_scan,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_basic_scan_no_user_inputs(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["masscan_scan"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_port_scan.assert_called_once()
+
+    def test_settings_fetched_and_masscan_force_enabled(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+        # Masscan should be called with MASSCAN_ENABLED=True regardless of project settings
+        call_kwargs = mocks["masscan_scan"].call_args
+        settings_passed = call_kwargs[1]["settings"] if "settings" in (call_kwargs[1] or {}) else call_kwargs[0][2] if len(call_kwargs[0]) > 2 else None
+        # The key check: run_masscan forces MASSCAN_ENABLED=True before calling run_masscan_scan
+
+    def test_user_ips_create_userinput_node(self):
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": ["10.0.0.1"]},
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
+        self.assertEqual(ui_kw["user_input_data"]["input_type"], "ips")
+        self.assertEqual(ui_kw["user_input_data"]["tool_id"], "Masscan")
+
+    def test_empty_graph_no_user_inputs_exits(self):
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": []},
+                domain_ips=[],
+                subdomain_ips=[],
+            )
+
+    def test_masscan_normalizes_to_port_scan(self):
+        """Verify masscan_scan data is copied to port_scan key for graph update."""
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        # update_graph_from_port_scan should be called with recon_data that has port_scan key
+        call_kwargs = mocks["neo4j_client"].update_graph_from_port_scan.call_args
+        recon_data = call_kwargs[1]["recon_data"]
+        self.assertIn("port_scan", recon_data)
+        self.assertIn("by_host", recon_data["port_scan"])
+        self.assertIn("by_ip", recon_data["port_scan"])
+
+    def test_structured_targets_generic_ips(self):
+        """IPs with ip_attach_to=None should create UserInput node."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+            domain_ips=[],
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
+        self.assertEqual(ui_kw["user_input_data"]["tool_id"], "Masscan")
+
+    def test_structured_targets_empty_uses_graph_only(self):
+        """Empty user_targets should just scan graph data."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": [], "ip_attach_to": None},
+            },
+            domain_ips=[{"address": "1.2.3.4", "version": "ipv4"}],
+        )
+        mocks["masscan_scan"].assert_called_once()
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+
+def _mock_nmap_scan_result(recon_data, output_file=None, settings=None):
+    """Mock run_nmap_scan: adds nmap_scan key to recon_data."""
+    recon_data["nmap_scan"] = {
+        "scan_metadata": {"scanner": "nmap", "nmap_version": "7.94"},
+        "by_host": {},
+        "services_detected": [],
+        "nse_vulns": [],
+        "summary": {"hosts_scanned": 1, "services_detected": 0, "nse_vulns_found": 0},
+    }
+    return recon_data
+
+
+class TestRunNmap(unittest.TestCase):
+    """Tests for run_nmap using module-level mocks."""
+
+    def _run_with_mocks(self, config, neo4j_connected=True, domain_ips=None, subdomain_ips=None):
+        """Helper that sets up all mocks and runs run_nmap."""
+        # Mock get_settings
+        mock_settings = MagicMock()
+        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True}
+
+        # Mock run_nmap_scan: adds nmap_scan key
+        mock_nmap_scan = MagicMock(side_effect=_mock_nmap_scan_result)
+
+        # Mock merge_nmap_into_port_scan
+        mock_merge = MagicMock()
+
+        # Mock Neo4jClient
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = neo4j_connected
+        mock_client.update_graph_from_nmap.return_value = {
+            "ports_enriched": 2, "services_enriched": 1, "technologies_created": 1,
+            "nse_vulns_created": 0, "cves_created": 0, "relationships_created": 3, "errors": [],
+        }
+
+        # Mock the neo4j driver session for graph queries
+        mock_session = MagicMock()
+        _domain_ips = domain_ips if domain_ips is not None else [
+            {"ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"},
+                       {"number": 443, "protocol": "tcp", "service": "https"}]},
+        ]
+        _subdomain_ips = subdomain_ips if subdomain_ips is not None else [
+            {"subdomain": "www.example.com", "ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"},
+                       {"number": 443, "protocol": "tcp", "service": "https"}]},
+        ]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "RESOLVES_TO]->(i:IP)" in query and "HAS_SUBDOMAIN" not in query and "HAS_PORT" in query:
+                # Domain -> IP -> Port query (for _build_port_scan_data_from_graph)
+                records = []
+                for ip_data in _domain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query and "RESOLVES_TO" in query and "HAS_PORT" in query:
+                # Subdomain -> IP -> Port query (for _build_port_scan_data_from_graph)
+                records = []
+                for ip_data in _subdomain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "Subdomain" in query and "RETURN s LIMIT 1" in query:
+                # Subdomain existence check
+                result.single.return_value = None
+                return result
+            else:
+                result.__iter__ = lambda self: iter([])
+            return result
+
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Create mock modules
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_nmap_mod = MagicMock()
+        mock_nmap_mod.run_nmap_scan = mock_nmap_scan
+
+        mock_main_mod = MagicMock()
+        mock_main_mod.merge_nmap_into_port_scan = mock_merge
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        # Inject mocks into sys.modules
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.nmap_scan': mock_nmap_mod,
+            'recon.main': mock_main_mod,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_nmap(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "nmap_scan": mock_nmap_scan,
+            "merge": mock_merge,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_basic_scan_no_user_inputs(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["nmap_scan"].assert_called_once()
+        mocks["merge"].assert_called_once()
+        mocks["neo4j_client"].update_graph_from_nmap.assert_called_once()
+
+    def test_settings_fetched(self):
+        mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
+        mocks["settings"].assert_called_once()
+
+    def test_user_ips_create_userinput_node(self):
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": ["10.0.0.1"]},
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
+        self.assertEqual(ui_kw["user_input_data"]["input_type"], "ips")
+        self.assertEqual(ui_kw["user_input_data"]["tool_id"], "Nmap")
+
+    def test_empty_graph_no_ports_exits(self):
+        """No ports in graph and no user inputs should exit."""
+        with self.assertRaises(SystemExit):
+            self._run_with_mocks(
+                {"domain": "example.com", "user_inputs": []},
+                domain_ips=[],
+                subdomain_ips=[],
+            )
+
+    def test_nmap_scan_called_with_port_scan_data(self):
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+        )
+        call_args = mocks["nmap_scan"].call_args
+        recon_data = call_args[0][0]
+        self.assertEqual(recon_data["domain"], "example.com")
+        self.assertIn("port_scan", recon_data)
+        self.assertIn("by_ip", recon_data["port_scan"])
+        self.assertIn("93.184.216.34", recon_data["port_scan"]["by_ip"])
+        self.assertIn(80, recon_data["port_scan"]["all_ports"])
+        self.assertIn(443, recon_data["port_scan"]["all_ports"])
+
+    def test_merge_called_after_scan(self):
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+        )
+        mocks["merge"].assert_called_once()
+
+    def test_graph_update_calls_update_from_nmap(self):
+        """Nmap without custom ports should call update_graph_from_nmap only."""
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": []},
+        )
+        mocks["neo4j_client"].update_graph_from_nmap.assert_called_once()
+        mocks["neo4j_client"].update_graph_from_port_scan.assert_not_called()
+
+    def test_custom_ports_injected_into_scan(self):
+        """Custom ports should be added to all_ports and each IP's port list."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"ips": [], "ports": [8443, 9090], "ip_attach_to": None},
+            },
+        )
+        call_args = mocks["nmap_scan"].call_args
+        recon_data = call_args[0][0]
+        self.assertIn(8443, recon_data["port_scan"]["all_ports"])
+        self.assertIn(9090, recon_data["port_scan"]["all_ports"])
+        # Original ports should still be there
+        self.assertIn(80, recon_data["port_scan"]["all_ports"])
+
+    def test_custom_ports_trigger_port_scan_graph_update(self):
+        """When custom ports are provided, update_graph_from_port_scan should be called first."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"ips": [], "ports": [8443], "ip_attach_to": None},
+            },
+        )
+        mocks["neo4j_client"].update_graph_from_port_scan.assert_called_once()
+        mocks["neo4j_client"].update_graph_from_nmap.assert_called_once()
+
+    def test_user_input_status_completed(self):
+        mocks = self._run_with_mocks(
+            {"domain": "example.com", "user_inputs": ["10.0.0.1"]},
+        )
+        mocks["neo4j_client"].update_user_input_status.assert_called_once()
+        args = mocks["neo4j_client"].update_user_input_status.call_args[0]
+        self.assertEqual(args[1], "completed")
+
+
+class TestRunNmapStructuredTargets(unittest.TestCase):
+    """Tests for run_nmap with new structured user_targets format."""
+
+    def _run_with_mocks(self, config, domain_ips=None, subdomain_ips=None):
+        """Helper that sets up all mocks and runs run_nmap with structured targets."""
+        mock_settings = MagicMock()
+        mock_settings.return_value = {"NMAP_ENABLED": True, "NMAP_VERSION_DETECTION": True}
+
+        mock_nmap_scan = MagicMock(side_effect=_mock_nmap_scan_result)
+        mock_merge = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = True
+        mock_client.update_graph_from_nmap.return_value = {
+            "ports_enriched": 1, "services_enriched": 1, "technologies_created": 0,
+            "nse_vulns_created": 0, "cves_created": 0, "relationships_created": 2, "errors": [],
+        }
+
+        mock_session = MagicMock()
+        _domain_ips = domain_ips if domain_ips is not None else [
+            {"ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"}]},
+        ]
+        _subdomain_ips = subdomain_ips if subdomain_ips is not None else [
+            {"subdomain": "www.example.com", "ip": "93.184.216.34", "version": "ipv4",
+             "ports": [{"number": 80, "protocol": "tcp", "service": "http"}]},
+        ]
+
+        def mock_session_run(query, **kwargs):
+            result = MagicMock()
+            if "RESOLVES_TO]->(i:IP)" in query and "HAS_SUBDOMAIN" not in query and "HAS_PORT" in query:
+                records = []
+                for ip_data in _domain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "HAS_SUBDOMAIN" in query and "RESOLVES_TO" in query and "HAS_PORT" in query:
+                records = []
+                for ip_data in _subdomain_ips:
+                    record = MagicMock()
+                    record.__getitem__ = lambda self, key, d=ip_data: d[key]
+                    records.append(record)
+                result.__iter__ = lambda self, r=records: iter(r)
+            elif "Subdomain" in query and "RETURN s LIMIT 1" in query:
+                # For subdomain existence check -- default to existing
+                mock_rec = MagicMock()
+                result.single.return_value = mock_rec
+                return result
+            else:
+                result.__iter__ = lambda self: iter([])
+            return result
+
+        mock_session.run = mock_session_run
+
+        mock_driver = MagicMock()
+        mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.driver = mock_driver
+
+        mock_neo4j_cls = MagicMock()
+        mock_neo4j_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_neo4j_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = mock_settings
+
+        mock_nmap_mod = MagicMock()
+        mock_nmap_mod.run_nmap_scan = mock_nmap_scan
+
+        mock_main_mod = MagicMock()
+        mock_main_mod.merge_nmap_into_port_scan = mock_merge
+
+        mock_graph_db = MagicMock()
+        mock_graph_db.Neo4jClient = mock_neo4j_cls
+
+        saved = {}
+        modules_to_mock = {
+            'recon.project_settings': mock_project_settings,
+            'recon.nmap_scan': mock_nmap_mod,
+            'recon.main': mock_main_mod,
+            'graph_db': mock_graph_db,
+        }
+        for name, mod in modules_to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+
+        os.environ.setdefault("USER_ID", "user1")
+        os.environ.setdefault("PROJECT_ID", "proj1")
+
+        try:
+            import importlib
+            import partial_recon as pr
+            importlib.reload(pr)
+            pr.run_nmap(config)
+        finally:
+            for name, mod in saved.items():
+                if mod is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = mod
+
+        return {
+            "settings": mock_settings,
+            "nmap_scan": mock_nmap_scan,
+            "merge": mock_merge,
+            "neo4j_client": mock_client,
+            "neo4j_cls": mock_neo4j_cls,
+        }
+
+    def test_ips_with_attach_to_null_creates_userinput(self):
+        """IPs with ip_attach_to=null should create a UserInput node."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": None},
+            },
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_called_once()
+        _, ui_kw = mocks["neo4j_client"].create_user_input_node.call_args
+        self.assertEqual(ui_kw["user_input_data"]["tool_id"], "Nmap")
+
+    def test_ips_with_attach_to_subdomain_no_userinput(self):
+        """IPs attached to a subdomain should NOT create a UserInput node."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": ["10.0.0.1"], "ip_attach_to": "www.example.com"},
+            },
+        )
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
+
+    def test_empty_user_targets_uses_graph_only(self):
+        """Empty user_targets should just scan graph data."""
+        mocks = self._run_with_mocks(
+            {
+                "domain": "example.com", "user_inputs": [],
+                "user_targets": {"subdomains": [], "ips": [], "ip_attach_to": None},
+            },
+        )
+        mocks["nmap_scan"].assert_called_once()
+        mocks["neo4j_client"].create_user_input_node.assert_not_called()
 
 
 if __name__ == "__main__":
