@@ -230,6 +230,7 @@ class ContainerManager:
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
+                    "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
                 },
                 volumes={
                     "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
@@ -729,6 +730,7 @@ class ContainerManager:
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
+                    "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
                 },
                 volumes={
                     "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
@@ -1019,6 +1021,7 @@ class ContainerManager:
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
+                    "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
                     # GVM connection settings
                     "GVM_SOCKET_PATH": os.environ.get("GVM_SOCKET_PATH", "/run/gvmd/gvmd.sock"),
                     "GVM_USERNAME": os.environ.get("GVM_USERNAME", "admin"),
@@ -1406,6 +1409,7 @@ class ContainerManager:
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
+                    "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
                 },
                 volumes={
                     # GitHub hunt output (read-write, for saving results)
@@ -1779,6 +1783,7 @@ class ContainerManager:
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
                     "NEO4J_USER": os.environ.get("NEO4J_USER", "neo4j"),
                     "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
+                    "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
                 },
                 volumes={
                     # TruffleHog output (read-write, for saving results)

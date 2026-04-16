@@ -28,6 +28,7 @@ from .project_settings import load_cypherfix_settings
 logger = logging.getLogger(__name__)
 
 WEBAPP_API_URL = os.environ.get("WEBAPP_API_URL", "http://webapp:3000")
+INTERNAL_HEADERS = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
 
 TOOL_HANDLERS = {
     "github_glob": github_glob,
@@ -424,7 +425,7 @@ class CodeFixOrchestrator:
     async def _load_remediation(self, remediation_id: str) -> Optional[dict]:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{WEBAPP_API_URL}/api/remediations/{remediation_id}")
+                resp = await client.get(f"{WEBAPP_API_URL}/api/remediations/{remediation_id}", headers=INTERNAL_HEADERS)
                 resp.raise_for_status()
                 return resp.json()
         except Exception as e:
@@ -436,6 +437,7 @@ class CodeFixOrchestrator:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.put(
                     f"{WEBAPP_API_URL}/api/remediations/{remediation_id}", json=data,
+                    headers=INTERNAL_HEADERS,
                 )
         except Exception as e:
             logger.error(f"Failed to update remediation: {e}")

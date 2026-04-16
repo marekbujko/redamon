@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { useAuth } from './AuthProvider'
 
 export interface ProjectSummary {
   id: string
@@ -42,18 +43,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+  const { user: authUser, isLoading: authLoading, isAdmin } = useAuth()
+
+  // Sync userId with auth state
+  useEffect(() => {
+    if (authLoading) return
+    if (!authUser) return
+
+    if (isAdmin) {
+      // Admin: use saved userId from localStorage, or default to own ID
+      const savedUserId = localStorage.getItem(STORAGE_KEY_USER)
+      setUserIdState(savedUserId || authUser.id)
+    } else {
+      // Standard user: always locked to own ID
+      setUserIdState(authUser.id)
+      localStorage.setItem(STORAGE_KEY_USER, authUser.id)
+    }
+  }, [authUser, authLoading, isAdmin])
 
   // Initialize from URL or localStorage
   useEffect(() => {
+    if (authLoading) return
     const urlProjectId = searchParams.get('project')
     const savedProjectId = localStorage.getItem(STORAGE_KEY_PROJECT)
-    const savedUserId = localStorage.getItem(STORAGE_KEY_USER)
     const projectIdToLoad = urlProjectId || savedProjectId
-
-    // Load user ID
-    if (savedUserId) {
-      setUserIdState(savedUserId)
-    }
 
     // Load project
     if (projectIdToLoad) {
@@ -91,7 +104,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } else {
       setIsLoading(false)
     }
-  }, [searchParams])
+  }, [searchParams, authLoading])
 
   const setCurrentProject = useCallback((project: ProjectSummary | null) => {
     setCurrentProjectState(project)
@@ -114,13 +127,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [searchParams, router, pathname])
 
   const setUserId = useCallback((id: string | null) => {
+    // Standard users cannot switch users
+    if (!isAdmin && authUser) {
+      setUserIdState(authUser.id)
+      return
+    }
     setUserIdState(id)
     if (id) {
       localStorage.setItem(STORAGE_KEY_USER, id)
     } else {
       localStorage.removeItem(STORAGE_KEY_USER)
     }
-  }, [])
+  }, [isAdmin, authUser])
 
   return (
     <ProjectContext.Provider value={{

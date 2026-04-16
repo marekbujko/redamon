@@ -516,7 +516,8 @@ def _fetch_user_api_key(user_id: str, webapp_url: str, key_name: str) -> str:
     import requests as _req
     try:
         url = f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true"
-        resp = _req.get(url, timeout=10)
+        _headers = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+        resp = _req.get(url, timeout=10, headers=_headers)
         resp.raise_for_status()
         return resp.json().get(key_name, '')
     except Exception as e:
@@ -529,7 +530,8 @@ def _fetch_user_settings_full(user_id: str, webapp_url: str) -> dict:
     import requests as _req
     try:
         url = f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true"
-        resp = _req.get(url, timeout=10)
+        _headers = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+        resp = _req.get(url, timeout=10, headers=_headers)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -563,7 +565,8 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     url = f"{webapp_url.rstrip('/')}/api/projects/{project_id}"
     logger.info(f"Fetching project settings from {url}")
 
-    response = requests.get(url, timeout=30)
+    _internal_headers = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+    response = requests.get(url, timeout=30, headers=_internal_headers)
     response.raise_for_status()
     project = response.json()
 

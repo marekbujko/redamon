@@ -52,11 +52,14 @@ RUN mkdir -p /data/js-recon-custom && chown nextjs:nodejs /data/js-recon-custom
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# CLI utility scripts (admin setup, password reset)
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+
 # Prisma schema + CLI for automatic migration on startup
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/prisma/package.json /tmp/prisma-pkg.json
 RUN PRISMA_VER=$(node -p "require('/tmp/prisma-pkg.json').version") && \
-    npm install --no-save "prisma@${PRISMA_VER}" && \
+    npm install --no-save "prisma@${PRISMA_VER}" bcryptjs && \
     npm cache clean --force && rm /tmp/prisma-pkg.json
 
 # Entrypoint: sync schema to PostgreSQL, then start server

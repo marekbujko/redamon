@@ -282,6 +282,7 @@ async def start_recon(project_id: str, request: ReconStartRequest):
 
             url = f"{request.webapp_api_url.rstrip('/')}/api/projects/{project_id}"
             req = urllib.request.Request(url)
+            req.add_header("X-Internal-Key", os.environ.get("INTERNAL_API_KEY", ""))
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
                     project = json_mod.loads(resp.read().decode())
@@ -475,6 +476,7 @@ async def start_partial_recon(project_id: str, request: PartialReconStartRequest
 
             url = f"{request.webapp_api_url.rstrip('/')}/api/projects/{project_id}"
             req = urllib.request.Request(url)
+            req.add_header("X-Internal-Key", os.environ.get("INTERNAL_API_KEY", ""))
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
                     project = json_mod.loads(resp.read().decode())
@@ -668,6 +670,7 @@ async def get_graph_inputs(project_id: str, tool_id: str, user_id: str = ""):
         import json as json_mod
         url = f"{webapp_url}/api/projects/{project_id}"
         req = urllib.request.Request(url)
+        req.add_header("X-Internal-Key", os.environ.get("INTERNAL_API_KEY", ""))
         with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 project = json_mod.loads(resp.read().decode())

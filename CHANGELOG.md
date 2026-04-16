@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.9.4] - 2026-04-16
+
+### Added
+
+- **Authentication system** -- RedAmon now requires login. Two roles are supported: `admin` (full control) and `standard` (restricted to own scope). Key features:
+  - **Login page** -- styled login page with RedAmon branding, dark/light theme support, email + password authentication
+  - **JWT sessions** -- signed tokens stored in httpOnly cookies with 7-day expiry. All routes are protected by Next.js middleware
+  - **Admin account setup** -- `./redamon.sh install`, `up`, `up dev`, and `update` automatically prompt for admin credentials in the terminal when no admin exists
+  - **User management page** -- admin-only page at `/settings/users` to create users (with or without password), set/change passwords, assign roles, and delete users
+  - **Role-based UI** -- admins see the full user switcher and "Users" nav link. Standard users see only their own name, change password, and logout
+  - **Password change** -- all users can change their own password via the user dropdown. Admins can change any user's password from the management page
+  - **CLI password reset** -- `./redamon.sh reset-password` to recover from a forgotten admin password
+  - **Service-to-service auth** -- internal Docker services (agent, recon, scanners) use a shared `INTERNAL_API_KEY` header to bypass user authentication. The key is auto-generated during install
+  - **Backward compatible** -- existing users without passwords remain accessible via admin switching. No data migration required
+
+### Changed
+
+- **User model** -- added `password` (bcrypt hash, default empty) and `role` (`admin` or `standard`, default `standard`) fields to the Prisma User model
+- **API route protection** -- `GET /api/users` now returns only the authenticated user's record for standard users (admin and internal calls see all). `GET /api/users/[id]` enforces ownership checks. `POST /api/users` and `DELETE /api/users/[id]` require admin role
+- **UserSelector** -- admin view retains the full user list with role badges and adds logout. Standard view shows only change password and logout
+- **GlobalHeader** -- "Users" nav link visible only to admin users
+- **ProjectProvider** -- user ID now defaults to the authenticated user. Standard users are locked to their own ID. Admin switching persists across page reloads
+- **Docker Compose** -- `AUTH_SECRET` and `INTERNAL_API_KEY` environment variables added to webapp, agent, kali-sandbox, and recon-orchestrator services
+- **Backend services** -- all HTTP calls from agentic, recon, recon-orchestrator, gvm-scan, github-secret-hunt, and trufflehog-scan to the webapp API now include the `X-Internal-Key` header
+- **Spawned containers** -- recon-orchestrator passes `INTERNAL_API_KEY` to all dynamically spawned containers (recon, partial recon, GVM, GitHub hunt, TruffleHog)
+
+---
+
 ## [3.9.3] - 2026-04-14
 
 ### Added

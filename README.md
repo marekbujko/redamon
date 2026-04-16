@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v3.9.3-release-2E8B57?style=flat" alt="Version 3.9.3"/>
+  <img height="24" src="https://img.shields.io/badge/v3.9.4-release-2E8B57?style=flat" alt="Version 3.9.4"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -137,9 +137,43 @@ cd redamon
 ./redamon.sh install --gvm
 ```
 
-The script builds all images and starts the services. When done, open **http://localhost:3000**.
+The script builds all images and starts the services.
 
-### 2. Configure
+### 2. Create Admin Account
+
+At the end of the install (and on every `./redamon.sh up` or `./redamon.sh update` if no admin exists), you will be prompted in the terminal:
+
+```
+[WARN] No admin user found. Let's create one.
+
+  Admin name: Your Name
+  Admin email: admin@example.com
+  Admin password: ********
+  Confirm password: ********
+```
+
+- **Admin name** -- display name shown in the UI (e.g. `Admin`, your name, anything you want).
+- **Admin email** -- used to log in at `http://localhost:3000/login`.
+- **Admin password** -- minimum 4 characters.
+
+After creation, open **http://localhost:3000** and sign in with the email and password you just set.
+
+**What the admin can do:**
+- Switch between all users via the user dropdown in the header (including users without a password).
+- Create new users (with or without a password) and assign them `admin` or `standard` roles.
+- Set or change any user's password.
+- Delete users (except themselves).
+- Access the **Users** management page from the header navigation.
+
+**Standard users** can only log in (if they have a password set by an admin), change their own password, and use the app within their own scope. They cannot switch users, create users, or access user management.
+
+If you forget the admin password, reset it from the terminal:
+
+```bash
+./redamon.sh reset-password
+```
+
+### 3. Configure
 
 Open **http://localhost:3000/settings** (gear icon in the header) to configure everything. No `.env` file is needed.
 
@@ -149,7 +183,7 @@ Open **http://localhost:3000/settings** (gear icon in the header) to configure e
 
 All settings are stored per-user in the database. See the **[AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)** wiki page for detailed setup instructions.
 
-### 3. Open the Webapp
+### 4. Open the Webapp
 
 Go to **http://localhost:3000** -- create a project, configure your target, and start scanning.
 
@@ -172,6 +206,7 @@ All lifecycle management is handled by a single script:
 | `./redamon.sh down` | Stop services (preserves data) |
 | `./redamon.sh status` | Show running services, version, GVM mode |
 | `./redamon.sh clean` | Remove containers + images, keep data |
+| `./redamon.sh reset-password` | Reset a user's password from the terminal |
 | `./redamon.sh purge` | Remove everything including all data |
 
 > Flags can be combined: `./redamon.sh install --skipkbase --gvm`

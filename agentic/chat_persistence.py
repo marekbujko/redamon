@@ -17,6 +17,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 WEBAPP_API_URL = os.environ.get("WEBAPP_API_URL", "http://webapp:3000")
+INTERNAL_HEADERS = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
 
 
 async def save_chat_message(
@@ -37,6 +38,7 @@ async def save_chat_message(
             resp = await client.post(
                 f"{WEBAPP_API_URL}/api/conversations/by-session/{session_id}/messages",
                 json=body,
+                headers=INTERNAL_HEADERS,
             )
             if resp.status_code not in (200, 201):
                 logger.warning(
@@ -56,6 +58,7 @@ async def update_conversation(
             resp = await client.patch(
                 f"{WEBAPP_API_URL}/api/conversations/by-session/{session_id}",
                 json=updates,
+                headers=INTERNAL_HEADERS,
             )
             if resp.status_code not in (200, 201):
                 logger.warning(

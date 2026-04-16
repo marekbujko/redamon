@@ -45,7 +45,8 @@ def fetch_github_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     url = f"{webapp_url.rstrip('/')}/api/projects/{project_id}"
     logger.info(f"Fetching GitHub settings from {url}")
 
-    response = requests.get(url, timeout=30)
+    _internal_headers = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+    response = requests.get(url, timeout=30, headers=_internal_headers)
     response.raise_for_status()
     project = response.json()
 
@@ -57,7 +58,8 @@ def fetch_github_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     if user_id:
         try:
             user_settings_url = f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true"
-            user_resp = requests.get(user_settings_url, timeout=30)
+            _internal_headers = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+            user_resp = requests.get(user_settings_url, timeout=30, headers=_internal_headers)
             user_resp.raise_for_status()
             user_settings = user_resp.json()
             settings['GITHUB_ACCESS_TOKEN'] = user_settings.get('githubAccessToken', DEFAULT_GITHUB_SETTINGS['GITHUB_ACCESS_TOKEN'])

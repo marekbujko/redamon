@@ -414,7 +414,11 @@ def _query_chisel_tunnel() -> dict | None:
     # Fetch chisel URL from webapp (stored in UserSettings via Global Settings UI)
     webapp_url = os.environ.get("WEBAPP_API_URL", "http://webapp:3000")
     try:
-        resp = _requests.get(f"{webapp_url}/api/global/tunnel-config", timeout=5)
+        resp = _requests.get(
+            f"{webapp_url}/api/global/tunnel-config",
+            headers={"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")},
+            timeout=5,
+        )
         resp.raise_for_status()
         chisel_url = resp.json().get("chiselServerUrl", "")
     except Exception as e:

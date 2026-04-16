@@ -159,6 +159,7 @@ async def check_target_guardrail(body: GuardrailRequest):
                     try:
                         resp = _requests.get(
                             f"{webapp_url.rstrip('/')}/api/users/{body.user_id}/llm-providers?internal=true",
+                            headers={"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")},
                             timeout=10,
                         )
                         resp.raise_for_status()
@@ -958,6 +959,7 @@ async def text_to_cypher(body: TextToCypherRequest):
         webapp_url = os.environ.get('WEBAPP_API_URL', 'http://webapp:3000')
         resp = _requests.get(
             f"{webapp_url.rstrip('/')}/api/users/{body.user_id}/llm-providers?internal=true",
+            headers={"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")},
             timeout=10,
         )
         resp.raise_for_status()

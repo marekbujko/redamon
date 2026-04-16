@@ -7,13 +7,14 @@ import os
 logger = logging.getLogger(__name__)
 
 WEBAPP_API_URL = os.environ.get("WEBAPP_API_URL", "http://webapp:3000")
+INTERNAL_HEADERS = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
 
 
 async def load_cypherfix_settings(project_id: str) -> dict:
     """Fetch cypherfix settings from webapp API, including user LLM providers."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{WEBAPP_API_URL}/api/projects/{project_id}")
+            resp = await client.get(f"{WEBAPP_API_URL}/api/projects/{project_id}", headers=INTERNAL_HEADERS)
             resp.raise_for_status()
             project = resp.json()
 
@@ -33,6 +34,7 @@ async def load_cypherfix_settings(project_id: str) -> dict:
                     prov_resp = await client.get(
                         f"{WEBAPP_API_URL}/api/users/{user_id}/llm-providers",
                         params={"internal": "true"},
+                        headers=INTERNAL_HEADERS,
                     )
                     if prov_resp.status_code == 200:
                         settings["user_llm_providers"] = prov_resp.json()
@@ -40,6 +42,7 @@ async def load_cypherfix_settings(project_id: str) -> dict:
                     us_resp = await client.get(
                         f"{WEBAPP_API_URL}/api/users/{user_id}/settings",
                         params={"internal": "true"},
+                        headers=INTERNAL_HEADERS,
                     )
                     if us_resp.status_code == 200:
                         settings["user_settings"] = us_resp.json()

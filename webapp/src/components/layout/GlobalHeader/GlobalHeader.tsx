@@ -3,10 +3,11 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Crosshair, FolderOpen, Shield, CircleHelp, TrendingUp, FileText, Settings } from 'lucide-react'
+import { Crosshair, FolderOpen, Shield, CircleHelp, TrendingUp, FileText, Settings, Users } from 'lucide-react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { ProjectSelector } from './ProjectSelector'
 import { UserSelector } from './UserSelector'
+import { useAuth } from '@/providers/AuthProvider'
 import styles from './GlobalHeader.module.css'
 
 const coreNav = [
@@ -18,6 +19,7 @@ const coreNav = [
 
 export function GlobalHeader() {
   const pathname = usePathname()
+  const { isAdmin } = useAuth()
 
   return (
     <header className={styles.header}>
@@ -54,6 +56,16 @@ export function GlobalHeader() {
           <FolderOpen size={14} />
           <span>Projects</span>
         </Link>
+
+        {isAdmin && (
+          <Link
+            href="/settings/users"
+            className={`${styles.navItem} ${pathname === '/settings/users' ? styles.navItemActive : ''}`}
+          >
+            <Users size={14} />
+            <span>Users</span>
+          </Link>
+        )}
 
         <div className={styles.divider} />
 

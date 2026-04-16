@@ -44,6 +44,16 @@ vi.mock('./UserSelector', () => ({
   UserSelector: () => <div data-testid="user-selector" />,
 }))
 
+vi.mock('@/providers/AuthProvider', () => ({
+  useAuth: () => ({
+    user: { id: 'test-user', name: 'Test Admin', email: 'admin@test.com', role: 'admin' },
+    isLoading: false,
+    isAdmin: true,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}))
+
 import { GlobalHeader } from './GlobalHeader'
 
 /* ------------------------------------------------------------------ */

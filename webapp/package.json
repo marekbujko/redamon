@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
+    "bcryptjs": "^2.4.3",
+    "jose": "^6.0.11",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-table": "^8.21.3",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -42,6 +44,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/archiver": "^6.0.0",

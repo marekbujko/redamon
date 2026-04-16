@@ -86,6 +86,79 @@ export_version() {
     REDAMON_VERSION="$(get_version)"
 }
 
+ensure_auth_secrets() {
+    local env_file="$SCRIPT_DIR/.env"
+    touch "$env_file"
+    if ! grep -q '^AUTH_SECRET=' "$env_file" 2>/dev/null; then
+        echo "AUTH_SECRET=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated AUTH_SECRET"
+    fi
+    if ! grep -q '^INTERNAL_API_KEY=' "$env_file" 2>/dev/null; then
+        echo "INTERNAL_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated INTERNAL_API_KEY"
+    fi
+}
+
+ensure_admin() {
+    # Wait for webapp to be healthy
+    local retries=0
+    while ! docker compose exec -T webapp wget -q --spider http://127.0.0.1:3000/api/health 2>/dev/null; do
+        retries=$((retries + 1))
+        if [[ $retries -ge 30 ]]; then
+            warn "Webapp not ready -- skipping admin check"
+            return
+        fi
+        sleep 2
+    done
+
+    local has_admin
+    has_admin=$(docker compose exec -T webapp node scripts/check-admin.mjs 2>/dev/null | tr -d '[:space:]')
+
+    if [[ "$has_admin" == "0" || -z "$has_admin" ]]; then
+        echo ""
+        warn "No admin user found. Let's create one."
+        echo ""
+        read -rp "  Admin name: " ADMIN_NAME </dev/tty
+        read -rp "  Admin email: " ADMIN_EMAIL </dev/tty
+        while true; do
+            read -srp "  Admin password: " ADMIN_PASS </dev/tty
+            echo ""
+            read -srp "  Confirm password: " ADMIN_PASS2 </dev/tty
+            echo ""
+            [[ "$ADMIN_PASS" == "$ADMIN_PASS2" ]] && break
+            warn "Passwords do not match. Try again."
+        done
+        docker compose exec -T \
+            -e "ADMIN_NAME=$ADMIN_NAME" \
+            -e "ADMIN_EMAIL=$ADMIN_EMAIL" \
+            -e "ADMIN_PASSWORD=$ADMIN_PASS" \
+            webapp node scripts/create-admin.mjs
+        success "Admin user created."
+        echo ""
+    fi
+}
+
+cmd_reset_password() {
+    echo ""
+    read -rp "  User email: " EMAIL </dev/tty
+    read -srp "  New password: " NEW_PASS </dev/tty
+    echo ""
+    read -srp "  Confirm password: " CONFIRM </dev/tty
+    echo ""
+
+    if [[ "$NEW_PASS" != "$CONFIRM" ]]; then
+        error "Passwords do not match."
+        exit 1
+    fi
+
+    docker compose exec -T \
+        -e "RESET_EMAIL=$EMAIL" \
+        -e "RESET_PASSWORD=$NEW_PASS" \
+        webapp node scripts/reset-password.mjs
+    success "Password updated."
+    echo ""
+}
+
 remove_redamon_images() {
     # Remove locally-built redamon images
     docker images --format '{{.Repository}}:{{.Tag}}' \
@@ -479,6 +552,9 @@ cmd_install() {
     # Export version for docker build arg
     export_version
 
+    # Generate auth secrets if not present
+    ensure_auth_secrets
+
     # Build all images (tools + core services)
     info "Building all images (this may take a while on first run)..."
     docker compose --profile tools build
@@ -505,6 +581,9 @@ cmd_install() {
     echo -e "  ${GREEN}${BOLD}  Open ${CYAN}http://localhost:3000${GREEN}${BOLD} in your browser${NC}"
     echo -e "  ${GREEN}${BOLD}==========================================================${NC}"
     echo ""
+
+    # Ensure an admin user exists (prompts if none found)
+    ensure_admin
 
     # Bootstrap the Knowledge Base if enabled (reads KB_ENABLED from kb_config.yaml).
     # Install always runs a fresh bootstrap -- first-time setup populates FAISS +
@@ -699,6 +778,13 @@ cmd_update() {
         info "No container images or source code needed updating."
     fi
     echo -e "  ${CYAN}Webapp:${NC}  http://localhost:3000"
+    echo ""
+
+    # Ensure auth secrets exist (first update after auth feature is added)
+    ensure_auth_secrets
+
+    # Ensure an admin user exists (prompts if none found)
+    ensure_admin
 }
 
 ensure_tool_images() {
@@ -727,6 +813,7 @@ cmd_up_dev() {
     fi
 
     ensure_tool_images
+    ensure_auth_secrets
 
     info "Starting RedAmon in DEV mode (GVM: ${gvm_flag})..."
 
@@ -747,6 +834,9 @@ cmd_up_dev() {
     echo -e "  ${GREEN}${BOLD}  Open ${CYAN}http://localhost:3000${GREEN}${BOLD} in your browser (hot-reload)${NC}"
     echo -e "  ${GREEN}${BOLD}==========================================================${NC}"
     echo ""
+
+    # Ensure an admin user exists (prompts if none found)
+    ensure_admin
 
     # Refresh the Knowledge Base if enabled (behavior B -- always run ingest,
     # trust manifest dedup). Same rationale as cmd_up. Dev mode still benefits
@@ -775,6 +865,7 @@ cmd_up() {
     fi
 
     ensure_tool_images
+    ensure_auth_secrets
 
     info "Starting RedAmon (GVM: ${gvm_mode})..."
 
@@ -798,6 +889,9 @@ cmd_up() {
     echo -e "  ${GREEN}${BOLD}  Open ${CYAN}http://localhost:3000${GREEN}${BOLD} in your browser${NC}"
     echo -e "  ${GREEN}${BOLD}==========================================================${NC}"
     echo ""
+
+    # Ensure an admin user exists (prompts if none found)
+    ensure_admin
 
     # Refresh the Knowledge Base if enabled. Behavior B: always run the ingest
     # pipeline on up. The two-layer dedup (file hashes + manifest) skips
@@ -1133,6 +1227,7 @@ cmd_help() {
     echo "  ./redamon.sh update           # Update to latest version"
     echo "  ./redamon.sh up               # Start after reboot"
     echo "  ./redamon.sh up dev           # Dev mode with hot-reload (auto-detects GVM)"
+    echo "  ./redamon.sh reset-password   # Reset a user's password"
     echo "  ./redamon.sh kb build lite    # Build Knowledge Base"
     echo "  ./redamon.sh kb update        # Refresh all KB sources"
     echo "  ./redamon.sh kb stats         # Show KB chunk counts"
@@ -1174,6 +1269,7 @@ case "${1:-help}" in
                 ;;
         esac
         ;;
+    reset-password) cmd_reset_password ;;
     help|--help|-h) cmd_help ;;
     *)
         error "Unknown command: $1"

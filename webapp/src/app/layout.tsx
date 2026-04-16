@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import '@/styles/index.css'
 import { QueryProvider } from '@/providers/QueryProvider'
+import { AuthProvider } from '@/providers/AuthProvider'
 import { ProjectProvider } from '@/providers/ProjectProvider'
 import { ToastProvider, AlertProvider } from '@/components/ui'
 import { AppLayout } from '@/components/layout'
@@ -48,13 +49,15 @@ export default function RootLayout({
       <body>
         <QueryProvider>
           <Suspense fallback={null}>
-            <ProjectProvider>
-              <ToastProvider>
-                <AlertProvider>
-                  <AppLayout>{children}</AppLayout>
-                </AlertProvider>
-              </ToastProvider>
-            </ProjectProvider>
+            <AuthProvider>
+              <ProjectProvider>
+                <ToastProvider>
+                  <AlertProvider>
+                    <AppLayout>{children}</AppLayout>
+                  </AlertProvider>
+                </ToastProvider>
+              </ProjectProvider>
+            </AuthProvider>
           </Suspense>
         </QueryProvider>
       </body>

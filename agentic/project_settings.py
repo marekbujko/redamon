@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+INTERNAL_HEADERS = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
+
 # =============================================================================
 # DANGEROUS TOOLS — require manual confirmation before execution
 # =============================================================================
@@ -225,7 +227,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     url = f"{webapp_url.rstrip('/')}/api/projects/{project_id}?includeSkillContent=true"
     logger.info(f"Fetching agent settings from {url}")
 
-    response = requests.get(url, timeout=30)
+    response = requests.get(url, headers=INTERNAL_HEADERS, timeout=30)
     response.raise_for_status()
     project = response.json()
 
@@ -332,6 +334,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
         try:
             providers_resp = requests.get(
                 f"{webapp_url.rstrip('/')}/api/users/{user_id}/llm-providers?internal=true",
+                headers=INTERNAL_HEADERS,
                 timeout=10,
             )
             providers_resp.raise_for_status()
@@ -344,6 +347,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
         try:
             user_settings_resp = requests.get(
                 f"{webapp_url.rstrip('/')}/api/users/{user_id}/settings?internal=true",
+                headers=INTERNAL_HEADERS,
                 timeout=10,
             )
             user_settings_resp.raise_for_status()

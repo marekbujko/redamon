@@ -17,6 +17,7 @@ from .project_settings import load_cypherfix_settings
 logger = logging.getLogger(__name__)
 
 WEBAPP_API_URL = os.environ.get("WEBAPP_API_URL", "http://webapp:3000")
+INTERNAL_HEADERS = {"X-Internal-Key": os.environ.get("INTERNAL_API_KEY", "")}
 
 
 class TriageOrchestrator:
@@ -234,6 +235,7 @@ class TriageOrchestrator:
                 resp = await client.post(
                     f"{WEBAPP_API_URL}/api/remediations/batch",
                     json={"projectId": self.project_id, "remediations": remediations},
+                    headers=INTERNAL_HEADERS,
                 )
                 resp.raise_for_status()
                 logger.info(f"Saved {len(remediations)} remediations")
@@ -248,6 +250,7 @@ class TriageOrchestrator:
                 resp = await client.get(
                     f"{WEBAPP_API_URL}/api/remediations",
                     params={"projectId": self.project_id},
+                    headers=INTERNAL_HEADERS,
                 )
                 resp.raise_for_status()
                 all_rems = resp.json()
