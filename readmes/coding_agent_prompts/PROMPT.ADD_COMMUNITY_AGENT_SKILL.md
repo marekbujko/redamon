@@ -2,7 +2,7 @@
 
 Add **[SKILL_NAME]** (e.g. `ssrf_exploitation`, `xxe_exploitation`, `race_conditions`) as a new **Community Agent Skill** shipped with RedAmon.
 
-> **Scope**: a Community Agent Skill is a `.md` workflow file that users import via "Import from Community" in Global Settings > Agent Skills. Once imported, it becomes a row in the Postgres `UserAttackSkill` table, competes with built-in skills in the Intent Router classification, and gets its full markdown content injected into the agent's system prompt when selected. Use this flow when you have a battle-tested attack workflow you want to ship in the catalog but do NOT want to hardcode into Python. For hardcoded first-class skills, see [PROMPT.ADD_BUILTIN_AGENT_SKILL.md](PROMPT.ADD_BUILTIN_AGENT_SKILL.md). For reference docs (tool playbooks, theory), see [PROMPT.ADD_CHAT_SKILL.md](PROMPT.ADD_CHAT_SKILL.md).
+> **Scope**: a Community Agent Skill is a `.md` workflow file that users import via "Import from Community" in Global Settings > Agent Skills. Once imported, it becomes a row in the Postgres `UserAttackSkill` table, competes with built-in skills in the Intent Router classification, and gets its full markdown content injected into the agent's system prompt when selected. Use this flow when you have a battle-tested attack workflow you want to ship in the catalog but do NOT want to hardcode into Python. For hardcoded first-class skills, see [PROMPT.ADD_BUILTIN_AGENT_SKILL.md](PROMPT.ADD_BUILTIN_AGENT_SKILL.md). For reference docs (tool playbooks, theory), see [PROMPT.ADD_COMMUNITY_CHAT_SKILL.md](PROMPT.ADD_COMMUNITY_CHAT_SKILL.md).
 
 ---
 
@@ -44,13 +44,13 @@ agentic/community-skills/<skill_name>.md
 | 3. Wiki community table | [redamon.wiki/Agent-Skills.md](../../redamon.wiki/Agent-Skills.md) "Community Skills" | YES if shipping publicly |
 | 4. Everything else | N/A | NO CODE CHANGES |
 
-The agentic `GET /community-skills` endpoint auto-discovers files by globbing the directory. There is nothing to register. Drop the file, rebuild the agent container, and it is picked up.
+The agentic `GET /community-skills` endpoint auto-discovers files by globbing the directory. There is nothing to register, and **no container rebuild is needed**: `./agentic/community-skills` is volume-mounted read-only into the agent container at `/app/community-skills` (see [docker-compose.yml:419](../../docker-compose.yml#L419)). Drop the file and it is picked up on the next `GET /community-skills` call.
 
 ---
 
 ## Critical rules (READ BEFORE EDITING)
 
-- **Rebuild the agent container** after adding a file under `agentic/`. `agent` is NOT volume-mounted, it bakes source into the image: `docker compose build agent && docker compose up -d agent`. The `/community-skills` endpoint lives in [agentic/api.py](../../agentic/api.py), served by the `agent` container.
+- **No container rebuild needed.** `./agentic/community-skills` is volume-mounted read-only into the agent container at [docker-compose.yml:419](../../docker-compose.yml#L419). Dropping a `.md` file there is instantly visible to the `/community-skills` endpoint. (This is an exception to the general rule that `agentic/` changes require rebuilding `agent`: that rule applies to Python code baked into the image, not to these two mounted directories.)
 - **No Prisma migration needed.** Community skills are not a Prisma model on their own, they become `UserAttackSkill` rows on import. The schema already supports this.
 - **Skills are per-user, not global.** Each user who wants this skill must click "Import from Community" in their Global Settings. Already-imported users will NOT auto-pick up new community skills, they need to re-import (duplicates are skipped by name).
 - **Skill content is capped at 50 KB.** The validation is at [webapp/src/app/api/users/[id]/attack-skills/route.ts](../../webapp/src/app/api/users/[id]/attack-skills/route.ts) POST handler (~line 67). Keep your file well under 50,000 characters.
@@ -64,7 +64,7 @@ The agentic `GET /community-skills` endpoint auto-discovers files by globbing th
 
 1. Check [agentic/community-skills/](../../agentic/community-skills/) for an existing file with the same or similar name. If found, STOP and decide whether to extend it instead.
 2. Search for related built-in skills in [agentic/prompts/](../../agentic/prompts/): if the topic is `sql_injection`, `xss`, `cve_exploit`, `brute_force_credential_guess`, `phishing_social_engineering`, or `denial_of_service`, users already have a built-in. Justify why the community version adds value (e.g. the SQLi community skill covers advanced bypasses beyond the sqlmap-focused built-in).
-3. Decide: is this really an Agent Skill (phase-structured attack workflow) or a Chat Skill (reference doc for on-demand injection)? If it is flags, tables, syntax cheat sheets: use [PROMPT.ADD_CHAT_SKILL.md](PROMPT.ADD_CHAT_SKILL.md) instead. If it is "first run X, then pivot to Y, then report Z": this is the right prompt.
+3. Decide: is this really an Agent Skill (phase-structured attack workflow) or a Chat Skill (reference doc for on-demand injection)? If it is flags, tables, syntax cheat sheets: use [PROMPT.ADD_COMMUNITY_CHAT_SKILL.md](PROMPT.ADD_COMMUNITY_CHAT_SKILL.md) instead. If it is "first run X, then pivot to Y, then report Z": this is the right prompt.
 
 ---
 
@@ -175,12 +175,9 @@ Only include a GitHub link if the skill ships in the public repo. If the skill i
 
 ---
 
-## Phase 4: Rebuild and verify
+## Phase 4: Verify
 
-```bash
-# Agent container bakes the community-skills directory into its image.
-docker compose build agent && docker compose up -d agent
-```
+No rebuild. The file is live as soon as you save it (directory is volume-mounted).
 
 ### Smoke test
 
@@ -211,7 +208,7 @@ docker compose build agent && docker compose up -d agent
 
 | Symptom | Likely cause |
 |---|---|
-| Skill not in `/community-skills` catalog | File not committed into agent image. Did you run `docker compose build agent`? Or the file is named `README.md` (excluded at [api.py:569](../../agentic/api.py)) |
+| Skill not in `/community-skills` catalog | File not in `./agentic/community-skills/` (that exact path), or filename is `README.md` (excluded at [api.py:569](../../agentic/api.py)), or missing `.md` extension. The directory is volume-mounted so there is no rebuild to miss |
 | "Import from Community" shows `total: 0` | webapp cannot reach `AGENT_API_URL`. Check `docker compose logs webapp` and the `AGENT_API_URL` env var in the webapp service |
 | Import works but classifier never picks the skill | Description is generic or overlaps with a built-in. Edit the description via Global Settings > Agent Skills > pencil icon. Or rewrite the opening paragraph of the .md |
 | Badge shows `SKILL` but workflow not in system prompt | Unlikely; `_resolve_user_skill()` is non-conditional. Check agent logs for errors parsing the `attack_path_type` |
@@ -231,6 +228,5 @@ docker compose build agent && docker compose up -d agent
 - [ ] No em dashes anywhere
 - [ ] (Optional) [agentic/community-skills/README.md](../../agentic/community-skills/README.md) updated
 - [ ] (Optional, if shipping publicly) [redamon.wiki/Agent-Skills.md](../../redamon.wiki/Agent-Skills.md) Community Skills table updated
-- [ ] Agent container rebuilt
-- [ ] `GET /community-skills` returns the new entry
+- [ ] `GET /community-skills` returns the new entry (no rebuild, directory is volume-mounted)
 - [ ] End-to-end: imported via UI, appears in project settings, classifier picks it on matching message, full content shows in agent system prompt

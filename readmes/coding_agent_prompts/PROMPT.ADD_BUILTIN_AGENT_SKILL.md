@@ -2,7 +2,7 @@
 
 Add **[SKILL_ID]** (e.g. `ssrf`, `xxe`, `deserialization`) as a new **built-in Agent Skill** to RedAmon.
 
-> **Scope**: this is the heaviest of the three skill systems. A built-in Agent Skill ships hardcoded with the product: it lives in Python, is classified automatically by the Intent Router, has its own workflow prompt injected into the agent's system prompt, declares per-skill tool requirements, shows up with a dedicated badge in the UI, and is toggleable per project. Use this flow **only** when the skill has deep tool integration and stable, production-grade content. For user-uploadable workflows, see [PROMPT.ADD_COMMUNITY_AGENT_SKILL.md](PROMPT.ADD_COMMUNITY_AGENT_SKILL.md). For on-demand reference docs, see [PROMPT.ADD_CHAT_SKILL.md](PROMPT.ADD_CHAT_SKILL.md).
+> **Scope**: this is the heaviest of the three skill systems. A built-in Agent Skill ships hardcoded with the product: it lives in Python, is classified automatically by the Intent Router, has its own workflow prompt injected into the agent's system prompt, declares per-skill tool requirements, shows up with a dedicated badge in the UI, and is toggleable per project. Use this flow **only** when the skill has deep tool integration and stable, production-grade content. For user-uploadable workflows, see [PROMPT.ADD_COMMUNITY_AGENT_SKILL.md](PROMPT.ADD_COMMUNITY_AGENT_SKILL.md). For on-demand reference docs, see [PROMPT.ADD_COMMUNITY_CHAT_SKILL.md](PROMPT.ADD_COMMUNITY_CHAT_SKILL.md).
 
 ---
 

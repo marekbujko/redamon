@@ -60,7 +60,7 @@ Key differences from Agent Skills:
 
 ## Critical rules (READ BEFORE EDITING)
 
-- **Rebuild the agent container** after adding files under `agentic/`. The `agent` container bakes source into the image: `docker compose build agent && docker compose up -d agent`. Both `skill_loader.py` and the `agentic/skills/` tree live inside that image.
+- **No container rebuild needed.** `./agentic/skills` is volume-mounted read-only into the agent container at [docker-compose.yml:418](../../docker-compose.yml#L418). Dropping a `.md` file into `agentic/skills/<category>/` is instantly visible to the loader. (This is an exception to the general rule that `agentic/` changes require rebuilding `agent`: that rule applies to Python code like `skill_loader.py` itself, not to the mounted `skills/` tree it reads.)
 - **YAML frontmatter is required** for a good UX. [skill_loader.py:29-50](../../agentic/skill_loader.py) parses `---`-delimited frontmatter. Without it, `name` falls back to `file_stem.replace("_", " ").title()` and `description` is empty.
 - **The skill ID is the path under `agentic/skills/` WITHOUT the extension**, with `/` as separator. `agentic/skills/active_directory/ad_kill_chain.md` has ID `active_directory/ad_kill_chain`. This is what `/skill <name>` matches against (partial, case-insensitive match via the frontend autocomplete at [InputArea.tsx](../../webapp/src/app/graph/components/AIAssistantDrawer/InputArea.tsx)).
 - **Path traversal is blocked.** `load_skill_content()` at [skill_loader.py:95-118](../../agentic/skill_loader.py) resolves the path and refuses anything outside the skills directory.
@@ -190,12 +190,9 @@ Skip this step if the skill is local-only for this install.
 
 ---
 
-## Phase 4: Rebuild and verify
+## Phase 4: Verify
 
-```bash
-# Agent container bakes the agentic/skills/ tree into its image.
-docker compose build agent && docker compose up -d agent
-```
+No rebuild. The file is live as soon as you save it (`./agentic/skills` is volume-mounted).
 
 ### Smoke test
 
@@ -227,7 +224,7 @@ docker compose build agent && docker compose up -d agent
 
 | Symptom | Likely cause |
 |---|---|
-| `/skills` catalog does not include the file | File not in agent image; rebuild with `docker compose build agent`. Or the file is missing the `.md` extension |
+| `/skills` catalog does not include the file | File not in `./agentic/skills/<category>/` (that exact path), missing `.md` extension, or the loader cannot parse the YAML frontmatter (check `docker compose logs agent` for `Failed to parse skill file`). The tree is volume-mounted so there is no rebuild to miss |
 | `name` shows as `File_stem Title Case` instead of your frontmatter value | Frontmatter malformed. Must start with `---` on line 1, close with `---` on its own line, use `key: value` pairs |
 | `description` empty in UI but present in file | Same frontmatter issue |
 | `/skill <name>` does not match | The autocomplete does partial, case-insensitive match on the skill's `name` field (not the ID). If the `name` frontmatter differs from the filename, use the `name` |
@@ -256,6 +253,5 @@ Flag this to the user when shipping a skill update.
 - [ ] File is under 50 KB
 - [ ] No em dashes anywhere
 - [ ] (Optional, if shipping publicly) [redamon.wiki/Chat-Skills.md](../../redamon.wiki/Chat-Skills.md) catalog table updated
-- [ ] Agent container rebuilt
-- [ ] `GET /skills` returns the new entry with correct `name`, `description`, `category`
+- [ ] `GET /skills` returns the new entry with correct `name`, `description`, `category` (no rebuild, directory is volume-mounted)
 - [ ] End-to-end: Import from Community -> appears in Global Settings > Chat Skills -> activates via `/skill <name>` -> badge appears -> agent answers from skill content -> `/skill remove` deactivates
